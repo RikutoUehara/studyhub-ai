@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>学習メニュー</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="menu">
+
+    <h1>学習メニュー</h1>
+
+    <p>どの機能を使いますか？</p>
+
+    <a href="{{ url_for('course') }}">
+    <button type="button">授業管理</button>
+</a>
+
+<br><br>
+
+    <button>要約を見る</button>
+    <br><br>
+
+    <button>復習テスト</button>
+    <br><br>
+
+    <button>学習履歴</button>
+
+    </div>
+</body>
+
+</html>

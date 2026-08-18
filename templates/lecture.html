@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
+
+    <title>講義一覧</title>
+</head>
+
+<body>
+
+<div class="lecture">
+
+<h1>{{ course.name }}</h1>
+
+<h2>講義一覧</h2>
+
+{% for lecture in lectures %}
+<div class="lecture-item">
+
+    第{{ lecture.week }}回
+
+    {% if lecture.pdf_filename %}
+
+        <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}">
+            <button>AI分析を見る</button>
+        </a>
+
+    {% else %}
+
+        <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}">
+            <button>PDFアップロード</button>
+        </a>
+
+    {% endif %}
+
+</div>
+{% endfor %}
+
+</div>
+
+</body>
+</html>

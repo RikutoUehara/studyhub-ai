@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>授業管理</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+
+<h1>授業管理</h1>
+
+<form method="POST">
+
+    <p>授業名</p>
+
+    <input type="text"
+           name="course_name"
+           required
+    >
+
+    <br><br>
+
+    <button type="submit">
+        追加
+    </button>
+
+</form>
+
+<hr>
+
+<h2>登録済み授業</h2>
+
+{% for course in courses %}
+<div class="course-item">
+        <a href="{{ url_for('lecture', course_id=course.id )}}">
+            <button>{{ course.name }}</button>
+        </a>
+</div>
+{% endfor %}
+
+</body>
+
+</html>

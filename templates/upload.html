@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>PDFアップロード</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="upload">
+
+        <h2>{{ lecture.week }}回の授業資料アップロード</h2>
+
+        <form id="upload-form" 
+              action="{{ url_for('upload_lecture', lecture_id=lecture.id) }}"
+              method="POST"
+              enctype="multipart/form-data">
+
+            <input type="file" name="pdf" accept=".pdf">
+
+            {% if error %}
+                <p>{{ error  }}</p>
+            {% endif %}
+            <br><br>
+            {% if lecture.pdf_filename %}
+                <button type="submit">PDFを差し替える</button>
+            {% else %}
+                <button type="submit">アップロード</button>
+            {% endif %}
+                
+        </form>
+
+        <div id="loading" style="display: none;">
+            <h2>AIが解析中です...</h2>
+            <p>しばらくお待ちください</p>
+        </div>
+    </div>
+
+<hr>
+
+<div class="pdf-text">
+    <details>
+        <summary>
+            抽出した文字を見る
+        </summary>
+        {% if lecture.text %}
+            <pre>{{ lecture.text }}</pre>
+        {% else %}
+            <p>まだ文字が抽出されていません</p>
+        {% endif %}
+    </details>
+</div>
+
+<h2>AIへの追加指示</h2>
+
+<form action="{{ url_for('reanalyze_lecture', lecture_id=lecture.id) }}"
+      method="POST">
+
+    <textarea
+        name="instruction"
+        rows="4"
+        placeholder="例：試験対策中心に詳しく説明してください"></textarea>
+
+    <br><br>
+
+    <button type="submit">
+        この指示で再分析
+    </button>
+
+</form>
+
+<div class="workspace">
+    <div class="left-panel">
+<h2>AIの分析結果</h2>
+<div class="result">
+    {% if lecture.summary %}
+        <div class="summary">
+            {{ summary_html|safe }}
+        </div>
+    {% else %}
+        <p>まだ分析されていません。</p>
+    {% endif %}
+</div>
+</div>
+
+<div class="right-panel">
+<h2>AIチャット</h2>
+
+<div class="chat-box">
+
+{% for message in messages %}
+
+<div class="message {{ message.role }}">
+    {{ message.content }}
+</div>
+{% endfor %}
+
+</div>
+
+
+<form class="chat-form" 
+      action="{{ url_for('chat', lecture_id=lecture.id) }}" 
+      method="POST">
+
+    <textarea
+        class="chat-input"
+        name="message"
+        rows="4"
+        cols="40"
+        placeholder="授業について質問してみよう">
+    </textarea>
+
+    <br><br>
+
+    <button 
+    class="chat-send"
+    type="submit">
+        送信
+    </button>
+
+</form>
+
+</div>
+
+</div>
+
+<script>
+    document.getElementById("upload-form").addEventListener("submit", function(){
+        document.getElementById("loading").style.display = "block";
+    })
+</script>
+
+</body>
+
+</html>
