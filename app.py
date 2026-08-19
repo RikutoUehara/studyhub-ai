@@ -12,6 +12,8 @@ import markdown
 
 from flask_sqlalchemy import SQLAlchemy
 
+from flask import send_from_directory
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -309,6 +311,10 @@ def chat(lecture_id):
     db.session.commit()
 
     return redirect(url_for("upload_lecture", lecture_id=lecture.id))
+
+@app.route("/uploads/<filename>")
+def uploaded_file(filename):
+    return send_from_directory("uploads", filename)
 
 
 
