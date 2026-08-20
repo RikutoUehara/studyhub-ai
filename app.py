@@ -278,34 +278,48 @@ def chat(lecture_id):
     db.session.add(user_message)
     db.session.commit()
 
-    response = client.chat.completions.create(
-    model="gpt-5-nano",
-    messages=[
-        {
+    chat_history = ChatMessage.query.filter_by(
+    lecture_id=lecture.id
+    ).order_by(ChatMessage.id.asc()).all()
+
+    history_messages = []
+
+    for chat in chat_history:
+        history_messages.append({
+            "role": chat.role,
+            "content": chat.content
+        })
+
+    openai_messages = [
+    {
         "role": "system",
         "content": f"""
         あなたは大学教授です。
 
-        以下の授業資料を参考に質問へ答えてください。
+        以下の授業資料を参考に、
+        ユーザーの質問に答えてください。
 
-        授業資料:
+        授業資料：
         {lecture.text}
         """
-        },
-        {
-            "role": "user",
-            "content": message
-        }
-        ]
+    }
+    ]
+
+    openai_messages.extend(history_messages)
+
+
+    response = client.chat.completions.create(
+    model="gpt-5-nano",
+    messages= openai_messages
     )
 
     reply = response.choices[0].message.content
 
     assistant_message = ChatMessage(
-    lecture_id=lecture.id,
-    role="assistant",
-    content=reply
-    )
+        lecture_id=lecture.id,
+        role="assistant",
+        content=reply
+        )
 
     db.session.add(assistant_message)
     db.session.commit()
