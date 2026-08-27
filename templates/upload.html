@@ -133,7 +133,7 @@
             {% for message in messages %}
 
             <div class="message {{ message.role }}">
-                {{ message.content }}
+                {{ message.content_html|safe }}
             </div>
                 {% endfor %}
         </div>
@@ -185,9 +185,52 @@
         pdfTab.classList.add("active");
 
     }
+    }
 
-}
+    const chatForm = document.querySelector(".chat-form");
+    const chatBox = document.querySelector(".chat-box");
 
+    chatForm.addEventListener("submit", function(event) {
+        event.preventDefault();
+        const formData = new FormData(chatForm);
+        const userText = formData.get("message");
+        const userMessage = document.createElement("div");
+        userMessage.classList.add("message", "user");
+        userMessage.textContent = userText;
+        chatBox.appendChild(userMessage);
+        userMessage.scrollIntoView({
+            behaviow: "smooth", 
+            block: "start"
+        });
+        chatForm.reset();
+        const loadingMessage = document.createElement("div");
+        loadingMessage.classList.add("message", "assistant");
+        loadingMessage.textContent = "AIが回答を生成中...";
+        chatBox.appendChild(loadingMessage);
+        loadingMessage.scrollIntoView({
+            behaviow: "smooth", 
+            block: "start"
+        });
+        fetch(chatForm.action, {
+            method: "POST",
+            body: formData
+            })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(data) {
+            loadingMessage.remove();
+            console.log(data);
+            const assistantMessage = document.createElement("div");
+            assistantMessage.classList.add("message", "assistant");
+            assistantMessage.innerHTML = data.reply_html;
+            chatBox.appendChild(assistantMessage);
+            assistantMessage.scrollIntoView({
+            behavior: "smooth", 
+            block: "start"
+            });
+        });
+    })
 </script>
 
 </body>
