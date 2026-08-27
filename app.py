@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 from pypdf import PdfReader
 
@@ -107,7 +107,7 @@ def upload_lecture(lecture_id):
 
     summary_html = markdown.markdown(
         lecture.summary or "", 
-        extensions=["tables"]
+        extensions=["tables", "fenced_code"]
     )
     text = ""
     summary = ""
@@ -178,7 +178,7 @@ def upload_lecture(lecture_id):
         summary = response.choices[0].message.content
         summary_html = markdown.markdown(
             summary, 
-            extensions=["tables"]
+            extensions=["tables", "fenced_code"]
         )
         lecture.summary = summary
         db.session.commit()
@@ -186,6 +186,12 @@ def upload_lecture(lecture_id):
     messages = ChatMessage.query.filter_by(
         lecture_id=lecture.id
     ).all()
+
+    for message in messages:
+        message.content_html = markdown.markdown(
+            message.content or "",
+            extensions=["tables", "fenced_code"]
+        )
 
     return render_template(
         "upload.html", 
@@ -299,6 +305,15 @@ def chat(lecture_id):
         以下の授業資料を参考に、
         ユーザーの質問に答えてください。
 
+        回答はMarkdown形式で記述してください。
+        見出しや通常の説明文、出展、URLなどを不必要に箇条書きにしないでください。
+
+        １つの説明を「項目名」「要点」「出展」などに細かく分割して、それぞれを別々の箇条書きにしないでください。
+
+        空の箇条書き(「-」だけの行)は作成しないでください。
+
+        見出し、箇条書き、表、コードブロック、引用を内容に応じて適切に使い分けてください。
+
         授業資料：
         {lecture.text}
         """
@@ -314,6 +329,12 @@ def chat(lecture_id):
     )
 
     reply = response.choices[0].message.content
+    reply_html = markdown.markdown(
+    reply or "",
+    extensions=["tables", "fenced_code"]
+    )
+
+    print(repr(reply))
 
     assistant_message = ChatMessage(
         lecture_id=lecture.id,
@@ -324,7 +345,10 @@ def chat(lecture_id):
     db.session.add(assistant_message)
     db.session.commit()
 
-    return redirect(url_for("upload_lecture", lecture_id=lecture.id))
+    return jsonify({
+    "reply": reply, 
+    "reply_html": reply_html
+    })
 
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):

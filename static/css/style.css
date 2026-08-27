@@ -147,6 +147,58 @@ button{
     color:#111827;
     border:1px solid #d1d5db;
     margin-right:auto;
+    text-align: left;
+}
+
+.assistant ul,
+.assistant ol {
+    padding-left: 24px;
+    margin: 10px, 0;
+}
+
+.assistant h1, 
+.assistant h2, 
+.assistant h3 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+}
+
+.assistant pre {
+    background: #f3f4f6;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+}
+
+.assistant pre code {
+    font-family: monospace;
+    /* 等幅フォント */
+}
+
+.assistant blockquote {
+    border-left: 4px solid #d1d5db;
+    padding-left: 12px;
+    margin: 12px 0;
+}
+
+.assistant table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    /* 表のセル同士の境界線と一本にまとめる */
+}
+
+.assistant th, 
+.assistant td {
+    border: 1px solid #111827;
+    padding: 8px;
+    /* th = Table Header(見出しセル) td = Table Data(普通のデータセル) */
+}
+
+.assistant th {
+    background: #f3f4f6;
+    font-weight: bold;
+    /* 太字 */
 }
 
 .viewer-tabs{
@@ -178,13 +230,13 @@ button{
 }
 
 .left-panel {
-    width: 70%;
+    width: 40%;
     overflow-y: auto;
     background-color: #ffffff;
 }
 
 .right-panel {
-    width: 30%;
+    width: 60%;
     height: 100%;
     display: flex;
     flex-direction: column;
