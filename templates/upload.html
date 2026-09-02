@@ -91,6 +91,13 @@
                 PDF
             </button>
 
+            <button id="quiz-tab"
+                    type="button"
+                    class="tab-button"
+                    onclick="showTab('quiz')">
+                復習テスト
+            </button>
+
         </div>
         <div id="analysis-content"
              class="tab-content">
@@ -121,6 +128,22 @@
             <p>PDFがまだアップロードされていません。</p>
 
             {% endif %}
+        </div>
+        <div id="quiz-content"
+             class="tab-content"
+             style="display:none;">
+
+            <h2>復習テスト</h2>
+
+            <button type="button"
+                    id="generate-quiz-button">
+                復習テストを生成
+            </button>
+            
+            <div id="quiz-question"></div>
+            <div id="quiz-result"></div>
+            <div id="quiz-feedback"></div>
+
         </div>
     </div>
 
@@ -164,28 +187,308 @@
 
     const analysis = document.getElementById("analysis-content");
     const pdf = document.getElementById("pdf-content");
+    const quiz = document.getElementById("quiz-content");
 
     const analysisTab = document.getElementById("analysis-tab");
     const pdfTab = document.getElementById("pdf-tab");
-
+    const quizTab = document.getElementById("quiz-tab");
     if(tab === "analysis"){
 
         analysis.style.display = "block";
         pdf.style.display = "none";
+        quiz.style.display = "none";
 
         analysisTab.classList.add("active");
         pdfTab.classList.remove("active");
+        quizTab.classList.remove("active");
 
-    }else{
+    }else if(tab === "pdf"){
 
         analysis.style.display = "none";
         pdf.style.display = "block";
+        quiz.style.display = "none";
 
         analysisTab.classList.remove("active");
         pdfTab.classList.add("active");
+        quizTab.classList.remove("active");
+
+    }else if(tab === "quiz"){
+
+        analysis.style.display = "none";
+        pdf.style.display = "none";
+        quiz.style.display = "block";
+
+        analysisTab.classList.remove("active");
+        pdfTab.classList.remove("active");
+        quizTab.classList.add("active");
 
     }
     }
+
+    const generateQuizButton = document.getElementById("generate-quiz-button");
+    const quizQuestion = document.getElementById("quiz-question");
+    const quizFeedback = document.getElementById("quiz-feedback");
+    const quizResult = document.getElementById("quiz-result");
+    let answeredCount = 0;
+    let correctCount = 0;
+    let totalQuestions = 0;
+    console.log(quizQuestion);
+    generateQuizButton.addEventListener("click", function() {
+        answeredCount = 0;
+        correctCount = 0;
+    function checkQuizFinished() {
+        if(answeredCount === totalQuestions) {
+            const percentage = Math.round(
+                (correctCount / totalQuestions) * 100
+            );
+            quizResult.innerHTML =
+                "<h3>復習テスト結果</h3>" +
+                "<p>" +
+                correctCount + " / " + totalQuestions +
+                " 問正解</p>" +
+                "<p>正答率：" + percentage + "%</p>";
+            quizResult.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+            });
+        }
+    }
+    console.log("復習テストボタンが押された");
+
+    fetch("{{ url_for('generate_quiz', lecture_id=lecture.id) }}", {
+        method: "POST"
+    })
+    .then(function(response) {
+        return response.json();
+    })
+    .then(function(data) {
+
+        quizQuestion.innerHTML = "";
+
+        totalQuestions = data.questions.length;
+
+        data.questions.forEach(function(question, index) {
+
+            const questionBox = document.createElement("div");
+
+            questionBox.classList.add("quiz-question-box");
+
+            const questionText = document.createElement("p");
+
+            questionText.textContent =
+                "問題" + (index + 1) + "：" + question.question;
+
+            questionBox.appendChild(questionText);
+            const feedback = document.createElement("div");
+            feedback.classList.add("quiz-feedback");
+            questionBox.appendChild(feedback);
+           
+            if(question.type === "multiple_choice") {
+                question.choices.forEach(function(choice) {
+                    const choiceButton = document.createElement("button");
+                    choiceButton.classList.add("quiz-choice");
+                    choiceButton.textContent = choice;
+                    choiceButton.addEventListener("click", function() {
+                        console.log("選んだ答え:", choice);
+                        console.log("正解:", question.answer);
+                        const allChoices = questionBox.querySelectorAll(".quiz-choice");
+                        allChoices.forEach(function(button) {
+                            if(button === choiceButton) {
+                                button.classList.add("selected");
+                            } else {
+                                button.classList.add("not-selected");
+                            }
+                            button.disabled = true;
+                        });
+                        answeredCount++;
+                        if(choice === question.answer) { 
+                            feedback.textContent = "⭕ 正解！"; 
+                            correctCount++;
+                        } else { 
+                            feedback.textContent = "❌ 不正解！"; 
+                        } 
+                        checkQuizFinished();
+                        feedback.innerHTML += 
+                            "<p><strong>解説：</strong>" + 
+                            question.explanation + 
+                            "</p>"; 
+                        feedback.scrollIntoView({ 
+                            behavior: "smooth", 
+                            block: "center" 
+                        });
+                    });
+                    questionBox.appendChild(choiceButton);
+                });
+
+            }
+            else if(question.type === "true_false") {
+                const trueButton = document.createElement("button");
+                trueButton.classList.add("quiz-choice");
+                trueButton.textContent = "○ 正しい";
+                const falseButton = document.createElement("button");
+                falseButton.classList.add("quiz-choice");
+                falseButton.textContent = "× 誤り";
+                function answerTrueFalse(selectedAnswer, selectedButton) {
+                    const buttons = [trueButton, falseButton];
+                    buttons.forEach(function(button) {
+                        if(button === selectedButton) {
+                            button.classList.add("selected");
+                        } else {
+                            button.classList.add("not-selected");
+                        }
+                        button.disabled = true;
+                    });
+                    answeredCount++;
+                    if(selectedAnswer === question.answer) {
+                        correctCount++;
+                        feedback.textContent = "⭕ 正解！";
+                    } else {
+                        feedback.textContent = "❌ 不正解！";
+                    }
+                    checkQuizFinished();
+                    feedback.innerHTML +=
+                        "<p><strong>解説：</strong>" +
+                        question.explanation +
+                        "</p>";
+                    feedback.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center"
+                    });
+                }
+                trueButton.addEventListener("click", function() {
+                    answerTrueFalse(true, trueButton);
+                });
+                falseButton.addEventListener("click", function() {
+                    answerTrueFalse(false, falseButton);
+                });
+                questionBox.appendChild(trueButton);
+                
+                questionBox.appendChild(falseButton);
+            }
+            else if(question.type === "keyword") {
+                const answerArea = document.createElement("div");
+                answerArea.classList.add("quiz-answer-area");
+                const answerInput = document.createElement("textarea");
+                answerInput.classList.add("quiz-answer-input");
+                answerInput.placeholder = "回答を入力してください";
+                const answerButton = document.createElement("button");
+                answerButton.type = "button";
+                answerButton.classList.add("quiz-answer-button");
+                answerButton.textContent = "回答する";
+                answerButton.addEventListener("click", function() {
+                    const userAnswer = answerInput.value.trim();
+                    const correctAnswer = question.answer.trim();
+                    console.log("ユーザーの回答:", userAnswer);
+                    console.log("正解:", correctAnswer);
+                    if(userAnswer === correctAnswer) {
+                        answeredCount++;
+                        correctCount++;
+                        feedback.textContent = "⭕ 正解！";
+                        feedback.innerHTML +=
+                            "<p><strong>解説：</strong>" +
+                            question.explanation +
+                            "</p>";
+                        feedback.scrollIntoView({
+                            behavior: "smooth",
+                            block: "center"
+                        });
+                        checkQuizFinished();
+                    } else {
+                        const formData = new FormData();
+                        formData.append("user_answer", userAnswer);
+                        formData.append("correct_answer", correctAnswer);
+                        fetch("{{ url_for('check_keyword', lecture_id=lecture.id) }}", {
+                            method: "POST",
+                            body: formData
+                        })
+                        .then(function(response) {
+                            return response.json();
+                        })
+                        .then(function(data) {
+                            answeredCount++;
+                            if(data.is_correct) {
+                                correctCount++;
+                                feedback.textContent = "⭕ 正解！（表記揺れ）";
+                            } else {
+                                feedback.textContent = "❌ 不正解！";
+                            }
+                            feedback.innerHTML +=
+                                "<p><strong>解説：</strong>" +
+                                question.explanation +
+                                "</p>";
+                            feedback.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center"
+                            });
+                            checkQuizFinished();
+                        })
+                    }
+                });
+                answerArea.appendChild(answerInput);
+                answerArea.appendChild(answerButton);
+                questionBox.appendChild(answerArea);
+            }
+            else if(question.type === "written") {
+                const answerArea = document.createElement("div");
+                answerArea.classList.add("quiz-answer-area");
+                const answerInput = document.createElement("textarea");
+                answerInput.classList.add("quiz-answer-input");
+                answerInput.placeholder = "記述式の回答を入力してください";
+                const answerButton = document.createElement("button");
+                answerButton.type = "button";
+                answerButton.classList.add("quiz-answer-button");
+                answerButton.textContent = "回答する";
+                answerButton.addEventListener("click", function() {
+                    const userAnswer = answerInput.value.trim();
+                    const formData = new FormData();
+                    formData.append("user_answer", userAnswer);
+                    formData.append("model_answer", question.model_answer);
+                    formData.append("rubric", JSON.stringify(question.rubric));
+                    console.log("記述式の回答:", userAnswer);
+                    console.log("模範解答:", question.model_answer);
+                    console.log("採点基準:", question.rubric);
+                    fetch("{{ url_for('check_written', lecture_id=lecture.id) }}", {
+                        method: "POST",
+                        body: formData
+                    })
+                    .then(function(response) {
+                        return response.json();
+                    })
+                    .then(function(data) {
+                        console.log("採点結果", data);
+                        answeredCount++;
+                        if(data.is_correct) {
+                            correctCount++;
+                        }
+                        feedback.innerHTML =
+                            "<p>" +
+                            (data.is_correct ? "⭕ 正解！" : "❌ 不正解！") +
+                            "</p>" +
+                            "<p><strong>得点：</strong>" +
+                            data.score + " / " + data.total +
+                            "</p>" +
+                            "<p><strong>フィードバック：</strong>" +
+                            data.feedback +
+                            "</p>" +
+                            "<p><strong>模範解答：</strong>" +
+                            question.model_answer +
+                            "</p>";
+                        checkQuizFinished();
+                    });
+                });
+                answerArea.appendChild(answerInput);
+                answerArea.appendChild(answerButton);
+
+    questionBox.appendChild(answerArea);
+}
+
+            quizQuestion.appendChild(questionBox);
+
+        });
+
+    });
+    });
+
 
     const chatForm = document.querySelector(".chat-form");
     const chatBox = document.querySelector(".chat-box");
