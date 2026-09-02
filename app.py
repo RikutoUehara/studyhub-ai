@@ -14,6 +14,8 @@ from flask_sqlalchemy import SQLAlchemy
 
 from flask import send_from_directory
 
+import json
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -259,8 +261,6 @@ def chat(lecture_id):
 
     message = request.form["message"]
 
-    print(message)
-
     user_message = ChatMessage(
     lecture_id=lecture.id,
     role="user",
@@ -320,8 +320,6 @@ def chat(lecture_id):
     extensions=["tables", "fenced_code"]
     )
 
-    print(repr(reply))
-
     assistant_message = ChatMessage(
         lecture_id=lecture.id,
         role="assistant",
@@ -340,6 +338,180 @@ def chat(lecture_id):
 def uploaded_file(filename):
     return send_from_directory("uploads", filename)
 
+@app.route("/lecture/<int:lecture_id>/quiz/generate", methods=["POST"])
+def generate_quiz(lecture_id):
+    lecture = Lecture.query.get(lecture_id)
+
+    response = client.chat.completions.create(
+        model="gpt-5-nano",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+                あなたは大学教授です。
+
+                以下の授業資料から、復習テストを作成してください。
+
+                必ずJSON形式のみで出力してください。
+                前置きやMarkdownは不要です。
+
+                形式は次の通りです。
+
+                {{
+                    "questions": [
+                        {{
+                            "type": "multiple_choice",
+                            "question": "問題文",
+                            "choices": ["選択肢1", "選択肢2", "選択肢3", "選択肢4"],
+                            "answer": "正解",
+                            "explanation": "解説"
+                        }},
+                        {{
+                            "type": "true_false",
+                            "question": "問題文",
+                            "answer": true,
+                            "explanation": "解説"
+                        }},
+                        {{
+                            "type": "keyword",
+                            "question": "問題文",
+                            "answer": "短い語句",
+                            "explanation": "解説"
+                        }},
+                        {{
+                            "type": "written",
+                            "question": "問題文",
+                            "model_answer": "模範解答",
+                            "rubric": [
+                                "必須論点1",
+                                "必須論点2",
+                                "必須論点3"
+                            ]
+                        }}
+                    ]
+                }}
+                問題作成ルール：
+                ・multiple_choice は4択問題にしてください。
+                ・true_false は正誤問題にしてください。
+                ・keyword は、専門用語・人名・制度名・出来事の名称などを答える問題にしてください。
+                ・keyword の answer は、必ず単語または短い語句にしてください。
+                ・keyword の answer を文章にしないでください。
+                ・written は、文章で説明する必要がある問題にしてください。
+                ・合計で10問になるようにしてください。
+
+                授業資料：
+                {lecture.text}
+                """
+            }
+        ]
+    )
+
+    quiz = response.choices[0].message.content
+    quiz_data = json.loads(quiz)
+
+    return jsonify(
+        quiz_data
+    )
+
+@app.route("/lecture/<int:lecture_id>/quiz/keyword/check", methods=["POST"])
+def check_keyword(lecture_id):
+
+    user_answer = request.form.get("user_answer")
+    correct_answer = request.form.get("correct_answer")
+
+    print("ユーザー回答:", user_answer)
+    print("模範解答:", correct_answer)
+
+    response = client.chat.completions.create(
+        model="gpt-5-nano",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+    のユーザー回答が、模範解答と同じ語句・人物・出来事を
+    単なる表記揺れで表しているか判定してください。
+    カタカナ転写、長音、表記方法などの違いは正解としてください。
+    ただし、別の人物・用語・出来事や、意味を説明しただけの回答は不正解です。
+
+    模範解答：
+    {correct_answer}
+
+    ユーザー回答：
+    {user_answer}
+
+    表記揺れとして正解なら true、
+    不正解なら false のみを出力してください。
+    """
+            }
+        ]
+    )
+
+    ai_result = response.choices[0].message.content.strip()
+
+    print("AI判定:", ai_result)
+
+    return jsonify({
+        "is_correct": ai_result.lower() == "true"
+    })
+
+@app.route("/lecture/<int:lecture_id>/quiz/written/check", methods=["POST"])
+def check_written(lecture_id):
+
+    user_answer = request.form.get("user_answer")
+    model_answer = request.form.get("model_answer")
+    rubric = request.form.get("rubric")
+    rubric = json.loads(rubric)
+    # 文字列から配列に
+
+    print("ユーザー回答:", user_answer)
+    print("模範解答:", model_answer)
+    print("採点基準:", rubric)
+
+    response = client.chat.completions.create(
+        model="gpt-5-nano",
+        response_format={"type": "json_object"}, 
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+    あなたは大学教授です。
+    学生の記述式問題の回答を厳格に採点してください。
+
+    模範解答：
+    {model_answer}
+
+    採点基準：
+    {rubric}
+
+    学生の回答：
+    {user_answer}
+
+    採点ルール：
+    ・採点基準の各項目を学生の回答が満たしているか確認してください。
+    ・単に意味が近いだけで、必要な論点が書かれていない場合は満たしたと判定しないでください。
+    ・学生の回答に書かれていない内容を推測して補わないでください。
+    ・部分的に触れているだけの場合は、満たしたと判定しないでください。
+
+    必ず次のJSON形式のみで回答してください。
+
+    {{
+        "is_correct": true,
+        "score": 3,
+        "total": 3,
+        "feedback": "採点についての説明"
+    }}
+    """
+            }
+        ]
+    )
+
+    ai_result = response.choices[0].message.content
+    print("AIの生回答", ai_result)
+    ai_result = json.loads(ai_result)
+    print("AI採点結果:", ai_result)
+    
+    return jsonify(ai_result)
+    
 
 
 if __name__ == "__main__":

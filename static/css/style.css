@@ -244,3 +244,33 @@ button{
     background-color: #f8fafc;
     border-left: 3px solid #e5e7eb;
 }
+
+.quiz-choice {
+    display: block;
+    margin: 10px 0;
+    text-align: left;
+}
+
+.quiz-choice.selected {
+    opacity: 1;
+}
+
+.quiz-choice.not-selected {
+    opacity: 0.35;
+}
+
+.quiz-answer-area {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.quiz-answer-input {
+    flex: 1;
+    min-height: 50px;
+    resize: vertical;
+}
+
+.quiz-answer-button {
+    flex-shrink: 0;
+}
