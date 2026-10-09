@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context
 
 from pypdf import PdfReader
 
@@ -15,6 +15,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask import send_from_directory
 
 import json
+
+import time
 
 load_dotenv()
 
@@ -107,76 +109,41 @@ def lecture(course_id):
 def upload_lecture(lecture_id):
     lecture = Lecture.query.get(lecture_id)
 
-    summary_html = markdown.markdown(
-        lecture.summary or "", 
-        extensions=["tables", "fenced_code"]
-    )
-    text = ""
-    summary = ""
-
     if request.method == "POST":
         pdf = request.files["pdf"]
 
         if pdf.filename == "":
-            return render_template(
-                "upload.html", 
-                lecture=lecture, 
-                summary_html= summary_html, 
-                error="ファイルを選択してください"
-            )
-            
+            return jsonify({
+                "success": False,
+                "error": "ファイルを選択してください"
+            }), 400
+
         filename = pdf.filename
         filepath = os.path.join("uploads", filename)
+
         pdf.save(filepath)
+
         lecture.pdf_filename = filename
-        db.session.commit()
+
         reader = PdfReader(filepath)
-        
+
+        text = ""
+
         for page in reader.pages:
             page_text = page.extract_text()
+
             if page_text:
                 text += page_text + "\n"
 
         lecture.text = text
 
-        response = client.chat.completions.create(
-                    model="gpt-5-nano",
-                    messages=[
-                        {"role": "user",
-                         "content": f"""
-                         あなたは大学教授です。
-
-以下の授業資料を分析してください。
-必ずMarkdown形式で出力してください。
-余計な前置きや説明は不要です。
-必ず「## 要約」から出力を開始してください。
-
-## 要約
-300文字程度
-
-## 重要語句
-- 用語
-- 説明
-
-## 試験に出そうなポイント
-- 箇条書き
-
-## 覚えるべき年号
-| 年号 | 出来事 |
-|------|--------|
-
-授業資料:
-{text}"""
-                         }
-                    ]
-                )
-        summary = response.choices[0].message.content
-        summary_html = markdown.markdown(
-            summary, 
-            extensions=["tables", "fenced_code"]
-        )
-        lecture.summary = summary
         db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "pdf_url": url_for("uploaded_file",filename=filename),
+            "text": text
+        })
 
     messages = ChatMessage.query.filter_by(
         lecture_id=lecture.id
@@ -188,72 +155,131 @@ def upload_lecture(lecture_id):
             extensions=["tables", "fenced_code"]
         )
 
+    summary_html = markdown.markdown(
+        lecture.summary or "",
+        extensions=["tables", "fenced_code"]
+    )
+
     return render_template(
-        "upload.html", 
+        "upload.html",
         lecture=lecture,
-        summary=summary,
         summary_html=summary_html,
-        text=text, 
         messages=messages
     )
 
-@app.route("/lecture/<int:lecture_id>/reanalyze", methods=["POST"])
-def reanalyze_lecture(lecture_id):
-    lecture = Lecture.query.get(lecture_id)
+def generate_summary_stream(lecture, instruction=None):
 
-    instruction = request.form["instruction"].strip()
-    if instruction == "":
-        prompt = f"""
-        あなたは大学教授です。
-        以下の授業資料を分析してください。
-        必ずMarkdown形式で出力してください。
+    prompt = f"""
+あなたは大学教授です。
 
-        ## 要約
-        300文字程度
+以下の授業資料を分析してください。
+回答は以下の授業資料に記載されている内容だけを根拠にしてください。
+資料にない情報を推測・補完しないでください。
+必ずMarkdown形式で出力してください。
+余計な前置きや説明は不要です。
+必ず「## 要約」から出力を開始してください。
 
-        ## 重要語句
-        - 用語
-        - 説明
+## 要約
+300文字程度
 
-        ## 試験に出そうなポイント
-        - 箇条書き
+## 重要語句
 
-        ## 覚えるべき年号
-        | 年号 | 出来事 |
-        |------|--------|
+以下の形式で出力してください。
+同じ用語を重複して出力しないでください。
 
-        授業資料：
-        {lecture.text}
-        """
-    else:
-        # 追加指示がある場合
-        prompt = f"""
-        あなたは大学教授です。
-        以下の追加指示を最優先してください。
+- **用語名**：説明
 
-        追加指示：
-        {instruction}
+## 試験に出そうなポイント
 
-        回答は必ずMarkdown形式で出力してください。
+- 箇条書き
 
-        授業資料：
-        {lecture.text}
-        """
+## 覚えるべき年号
 
-    response = client.chat.completions.create(
-        model="gpt-5-nano",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+授業資料に明記されている年号・年月日のみ抽出してください。
+条文番号（例：第96条）やページ番号など、
+年号・年月日ではない数字は含めないでください。
+
+資料に存在しない年号を推測・補完してはいけません。
+
+統計資料の集計時点やデータベースの基準日など、
+授業内容そのものを理解するうえで重要でない日付は含めないでください。
+
+年号がない場合は、
+表を出力せず「該当なし」としてください。
+
+| 年号 | 出来事 |
+|------|--------|
+
+授業資料：
+
+{lecture.text}
+"""
+
+    if instruction:
+        prompt += f"""
+
+追加指示：
+
+{instruction}
+
+追加指示にも従いつつ、
+授業資料にない情報を推測・補完しないでください。
+"""
+
+    summary_parts = []
+
+    stream = client.responses.create(
+        model="gpt-5.4-mini",
+        reasoning={
+            "effort": "medium"
+        },
+        input=prompt,
+        stream=True
     )
 
-    lecture.summary = response.choices[0].message.content
+    for event in stream:
+
+        if event.type == "response.output_text.delta":
+
+            summary_parts.append(event.delta)
+
+            yield event.delta
+
+    summary = "".join(summary_parts)
+
+    lecture.summary = summary
     db.session.commit()
 
-    return redirect(url_for("upload_lecture", lecture_id=lecture.id))
+@app.route("/lecture/<int:lecture_id>/summary-stream")
+def stream_summary(lecture_id):
+
+    lecture = Lecture.query.get(lecture_id)
+
+    return Response(
+        stream_with_context(
+            generate_summary_stream(lecture)
+        ),
+        mimetype="text/plain"
+    )
+@app.route("/lecture/<int:lecture_id>/reanalyze", methods=["POST"])
+def reanalyze_lecture(lecture_id):
+
+    lecture = Lecture.query.get(lecture_id)
+
+    instruction = request.form.get(
+        "instruction",
+        ""
+    ).strip()
+
+    return Response(
+        stream_with_context(
+            generate_summary_stream(
+                lecture,
+                instruction
+            )
+        ),
+        mimetype="text/plain"
+    )
 
 @app.route("/lecture/<int:lecture_id>/chat", methods=["POST"])
 def chat(lecture_id):
@@ -262,77 +288,90 @@ def chat(lecture_id):
     message = request.form["message"]
 
     user_message = ChatMessage(
-    lecture_id=lecture.id,
-    role="user",
-    content=message
+        lecture_id=lecture.id,
+        role="user",
+        content=message
     )
 
     db.session.add(user_message)
     db.session.commit()
 
     chat_history = ChatMessage.query.filter_by(
-    lecture_id=lecture.id
+        lecture_id=lecture.id
     ).order_by(ChatMessage.id.asc()).all()
 
     history_messages = []
 
-    for chat in chat_history:
+    for chat_message in chat_history:
         history_messages.append({
-            "role": chat.role,
-            "content": chat.content
+            "role": chat_message.role,
+            "content": chat_message.content
         })
 
     openai_messages = [
-    {
-        "role": "system",
-        "content": f"""
-        あなたは大学教授です。
+        {
+            "role": "system",
+            "content": f"""
+あなたは大学教授です。
 
-        以下の授業資料を参考に、
-        ユーザーの質問に答えてください。
+以下の授業資料を参考に、
+ユーザーの質問に答えてください。
 
-        回答はMarkdown形式で記述してください。
-        見出しや通常の説明文、出展、URLなどを不必要に箇条書きにしないでください。
+回答はMarkdown形式で記述してください。
+見出しや通常の説明文、出典、URLなどを不必要に箇条書きにしないでください。
 
-        １つの説明を「項目名」「要点」「出展」などに細かく分割して、それぞれを別々の箇条書きにしないでください。
+１つの説明を「項目名」「要点」「出典」などに細かく分割して、
+それぞれを別々の箇条書きにしないでください。
 
-        空の箇条書き(「-」だけの行)は作成しないでください。
+空の箇条書き（「-」だけの行）は作成しないでください。
 
-        見出し、箇条書き、表、コードブロック、引用を内容に応じて適切に使い分けてください。
+見出し、箇条書き、表、コードブロック、引用を
+内容に応じて適切に使い分けてください。
 
-        授業資料：
-        {lecture.text}
-        """
-    }
+授業資料：
+{lecture.text}
+"""
+        }
     ]
 
     openai_messages.extend(history_messages)
 
+    def generate():
 
-    response = client.chat.completions.create(
-    model="gpt-5-nano",
-    messages= openai_messages
-    )
+        reply_parts = []
 
-    reply = response.choices[0].message.content
-    reply_html = markdown.markdown(
-    reply or "",
-    extensions=["tables", "fenced_code"]
-    )
-
-    assistant_message = ChatMessage(
-        lecture_id=lecture.id,
-        role="assistant",
-        content=reply
+        stream = client.responses.create(
+            model="gpt-5.4-nano",
+            reasoning={
+                "effort": "low"
+            },
+            input=openai_messages,
+            stream=True
         )
 
-    db.session.add(assistant_message)
-    db.session.commit()
+        for event in stream:
 
-    return jsonify({
-    "reply": reply, 
-    "reply_html": reply_html
-    })
+            if event.type == "response.output_text.delta":
+
+                reply_parts.append(event.delta)
+
+                yield event.delta
+
+        reply = "".join(reply_parts)
+
+        assistant_message = ChatMessage(
+            lecture_id=lecture.id,
+            role="assistant",
+            content=reply
+        )
+
+        db.session.add(assistant_message)
+        db.session.commit()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/plain"
+    )
 
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):
@@ -340,77 +379,76 @@ def uploaded_file(filename):
 
 @app.route("/lecture/<int:lecture_id>/quiz/generate", methods=["POST"])
 def generate_quiz(lecture_id):
+
     lecture = Lecture.query.get(lecture_id)
 
-    response = client.chat.completions.create(
-        model="gpt-5-nano",
-        messages=[
-            {
-                "role": "user",
-                "content": f"""
-                あなたは大学教授です。
+    def generate():
 
-                以下の授業資料から、復習テストを作成してください。
+        buffer = ""
 
-                必ずJSON形式のみで出力してください。
-                前置きやMarkdownは不要です。
+        stream = client.responses.create(
+            model="gpt-5.4-nano",
+            reasoning={
+                "effort": "medium"
+            },
+            input=f"""
+あなたは大学教授です。
 
-                形式は次の通りです。
+以下の授業資料から復習テストを10問作成してください。
 
-                {{
-                    "questions": [
-                        {{
-                            "type": "multiple_choice",
-                            "question": "問題文",
-                            "choices": ["選択肢1", "選択肢2", "選択肢3", "選択肢4"],
-                            "answer": "正解",
-                            "explanation": "解説"
-                        }},
-                        {{
-                            "type": "true_false",
-                            "question": "問題文",
-                            "answer": true,
-                            "explanation": "解説"
-                        }},
-                        {{
-                            "type": "keyword",
-                            "question": "問題文",
-                            "answer": "短い語句",
-                            "explanation": "解説"
-                        }},
-                        {{
-                            "type": "written",
-                            "question": "問題文",
-                            "model_answer": "模範解答",
-                            "rubric": [
-                                "必須論点1",
-                                "必須論点2",
-                                "必須論点3"
-                            ]
-                        }}
-                    ]
-                }}
-                問題作成ルール：
-                ・multiple_choice は4択問題にしてください。
-                ・true_false は正誤問題にしてください。
-                ・keyword は、専門用語・人名・制度名・出来事の名称などを答える問題にしてください。
-                ・keyword の answer は、必ず単語または短い語句にしてください。
-                ・keyword の answer を文章にしないでください。
-                ・written は、文章で説明する必要がある問題にしてください。
-                ・合計で10問になるようにしてください。
+必ず1行につき1問のJSONだけを出力してください。
+JSON配列にはしないでください。
+Markdownや前置きは不要です。
 
-                授業資料：
-                {lecture.text}
-                """
-            }
-        ]
-    )
+例：
 
-    quiz = response.choices[0].message.content
-    quiz_data = json.loads(quiz)
+{{"type":"multiple_choice","question":"問題文","choices":["選択肢1","選択肢2","選択肢3","選択肢4"],"answer":"正解","explanation":"解説"}}
 
-    return jsonify(
-        quiz_data
+{{"type":"true_false","question":"問題文","answer":true,"explanation":"解説"}}
+
+{{"type":"keyword","question":"問題文","answer":"短い語句","explanation":"解説"}}
+
+{{"type":"written","question":"問題文","model_answer":"模範解答","rubric":["必須論点1","必須論点2","必須論点3"]}}
+
+問題作成ルール：
+・multiple_choice は4択問題にしてください。
+・true_false は正誤問題にしてください。
+・keyword は、専門用語・人名・制度名・出来事の名称などを答える問題にしてください。
+・keyword の answer は、必ず単語または短い語句にしてください。
+・keyword の answer を文章にしないでください。
+・written は、文章で説明する必要がある問題にしてください。
+・合計で10問にしてください。
+・授業資料に書かれていない内容を推測して問題にしないでください。
+
+授業資料：
+{lecture.text}
+""",
+            stream=True
+        )
+
+        for event in stream:
+
+            if event.type == "response.output_text.delta":
+
+                buffer += event.delta
+
+                while "\n" in buffer:
+
+                    line, buffer = buffer.split("\n", 1)
+
+                    line = line.strip()
+
+                    if line:
+                        yield line + "\n"
+
+        buffer = buffer.strip()
+
+        if buffer:
+            yield buffer + "\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="application/x-ndjson"
     )
 
 @app.route("/lecture/<int:lecture_id>/quiz/keyword/check", methods=["POST"])
@@ -423,7 +461,7 @@ def check_keyword(lecture_id):
     print("模範解答:", correct_answer)
 
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-5.4-nano",
         messages=[
             {
                 "role": "user",
@@ -468,7 +506,7 @@ def check_written(lecture_id):
     print("採点基準:", rubric)
 
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-5.4-nano",
         response_format={"type": "json_object"}, 
         messages=[
             {

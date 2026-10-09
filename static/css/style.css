@@ -25,6 +25,18 @@ button{
     cursor:pointer;
 }
 
+.button{
+    background-color:#2563eb;
+    color:white;
+    border:none;
+    padding:15px 30px;
+    font-size:20px;
+    border-radius:10px;
+    cursor:pointer; 
+    display: inline-block;
+    text-decoration: none;
+}
+
 .pdf-text summary{
     background-color:#2563eb;
     color:white;
@@ -92,8 +104,9 @@ button{
 
 .summary th,
 .summary td{
-    border:1px solid #ccc;
+    border:1px solid #cccccc;
     padding:10px;
+    text-align:left;
 }
 
 .summary pre{
