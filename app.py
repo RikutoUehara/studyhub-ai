@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, abort
 
 from pypdf import PdfReader
 
@@ -18,6 +18,10 @@ import json
 
 import time
 
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from flask_login import LoginManager, UserMixin, login_user, current_user, login_required, logout_user
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -26,11 +30,44 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///study.db"
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+
 db = SQLAlchemy(app)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+
+    courses = db.relationship(
+        "Course",
+        backref="user",
+        lazy="select"
+    )
 
 class Course(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    lectures = db.relationship(
+        "Lecture",
+        backref="course",
+        lazy="select"
+    )
 
 class Lecture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -69,7 +106,62 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+
+        # 入力チェック
+        if not email or not password:
+            return "メールアドレスとパスワードを入力してください", 400
+
+        # 同じメールアドレスが既に登録されていないか確認
+        existing_user = User.query.filter_by(email=email).first()
+
+        if existing_user:
+            return "このメールアドレスは既に登録されています", 400
+
+        # パスワードをハッシュ化
+        password_hash = generate_password_hash(password)
+
+        # Userを作成
+        user = User(
+            email=email,
+            password_hash=password_hash
+        )
+
+        db.session.add(user)
+        db.session.commit()
+
+        return redirect(url_for("login"))
+
+    return render_template("register.html")
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+
+        user = User.query.filter_by(email=email).first()
+
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            return redirect(url_for("home"))
+
+        return "メールアドレスまたはパスワードが違います", 401
+
+    return render_template("login.html")
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
 @app.route("/")
+@login_required
 def home():
     return render_template("index.html")
 
@@ -78,20 +170,26 @@ def menu():
     return render_template("menu.html")
 
 @app.route("/course", methods=["GET", "POST"])
+@login_required
 def course():
     if request.method == "POST":
         course_name = request.form["course_name"]
-        course = Course(name=course_name)
-        db.session.add(course)
+        new_course = Course(
+            name=course_name, 
+            user_id=current_user.id
+            )
+        db.session.add(new_course)
         db.session.commit()
 
         for week in range(1, 16):
-            lecture = Lecture(course_id=course.id, 
+            lecture = Lecture(course_id=new_course.id, 
                               week=week)
             db.session.add(lecture)
         db.session.commit()
 
-    courses = Course.query.all()
+    courses = Course.query.filter_by(
+        user_id=current_user.id
+    ).all()
     return render_template("course.html", 
                            courses=courses)
 
@@ -107,8 +205,13 @@ def lecture(course_id):
 
 @app.route("/lecture/<int:lecture_id>/upload", methods=["GET", "POST"])
 def upload_lecture(lecture_id):
-    lecture = Lecture.query.get(lecture_id)
+    lecture = db.session.get(Lecture, lecture_id)
 
+    if lecture is None:
+        abort(404, description="講義が見つかりません")
+
+    if lecture.course.user_id != current_user.id:
+        abort(403, description="アクセスが許可されていません")
     if request.method == "POST":
         pdf = request.files["pdf"]
 
