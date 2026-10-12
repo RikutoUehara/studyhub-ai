@@ -1,20 +1,23 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>StudyHub AI</title>
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+  </head>
+  <body>
     <div class="index">
+      <h1>StudyHub AI</h1>
+      <p>大学生のためのAI学習支援システム</p>
 
-        <h1>StudyHub AI</h1>
-        <p>大学生のためのAI学習支援システム</p>
-    
-        <a href="{{ url_for('menu')}}" class="button">
-            学習を始める
-        </a>
+      <a href="{{ url_for('menu')}}" class="button"> 学習を始める </a>
+
+      <div class="logout-area">
+        <a href="{{ url_for('logout') }}">ログアウト</a>
+      </div>
     </div>
-</body>
+  </body>
 </html>
