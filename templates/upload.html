@@ -138,7 +138,14 @@
 
           <div id="quiz-question"></div>
           <div id="quiz-result"></div>
-          <div id="quiz-feedback"></div>
+
+          <div class="quiz-history">
+  <h3>得点推移</h3>
+  <canvas id="quiz-score-chart"></canvas>
+</div>
+
+<div id="quiz-feedback"></div>
+
         </div>
       </div>
 
@@ -164,10 +171,48 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    </script>
+  </body>
+</html>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
+      const quizScoreData = {{ quiz_score_data | tojson }};
+      const quizScoreChart = new Chart(
+  document.getElementById("quiz-score-chart"),
+  {
+    type: "line",
+
+    data: {
+      labels: quizScoreData.map(item => item.label),
+
+      datasets: [
+        {
+          label: "正答率",
+          data: quizScoreData.map(item => item.score),
+          tension: 0.2
+        }
+      ]
+    },
+
+    options: {
+      scales: {
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            callback: function(value) {
+              return value + "%";
+            }
+          }
+        }
+      }
+    }
+  }
+);
+
       const uploadForm = document.getElementById("upload-form");
       const uploadButton = uploadForm.querySelector("button[type='submit']");
       uploadForm.addEventListener("submit", async function (event) {
@@ -298,33 +343,72 @@
       let correctCount = 0;
       let totalQuestions = 0;
       let generationFinished = false;
+      let quizResultSaved = false;
+
+      async function saveQuizResult() {
+  const response = await fetch(
+    "{{ url_for('save_quiz_result', lecture_id=lecture.id) }}",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        score: correctCount,
+        total_questions: totalQuestions,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("復習テスト結果の保存に失敗しました");
+  }
+
+  return await response.json();
+}
 
       // 全問題に回答したか確認する
-      function checkQuizFinished() {
-        if (
-          generationFinished &&
-          answeredCount === totalQuestions &&
-          totalQuestions > 0
-        ) {
-          const percentage = Math.round((correctCount / totalQuestions) * 100);
+      async function checkQuizFinished() {
+  if (
+    generationFinished &&
+    answeredCount === totalQuestions &&
+    totalQuestions > 0
+  ) {
+    const percentage = Math.round(
+      (correctCount / totalQuestions) * 100
+    );
 
-          quizResult.innerHTML =
-            "<h3>復習テスト結果</h3>" +
-            "<p>" +
-            correctCount +
-            " / " +
-            totalQuestions +
-            " 問正解</p>" +
-            "<p>正答率：" +
-            percentage +
-            "%</p>";
+    quizResult.innerHTML =
+      "<h3>復習テスト結果</h3>" +
+      "<p>" +
+      correctCount +
+      " / " +
+      totalQuestions +
+      " 問正解</p>" +
+      "<p>正答率：" +
+      percentage +
+      "%</p>";
 
-          quizResult.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-        }
+    quizResult.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+
+    if (!quizResultSaved) {
+      quizResultSaved = true;
+
+      try {
+        const result = await saveQuizResult();
+        quizScoreChart.data.labels.push(result.label);
+        quizScoreChart.data.datasets[0].data.push(result.score);
+        quizScoreChart.update();
+      } catch (error) {
+        console.error(error);
+        quizResultSaved = false;
       }
+    }
+  }
+}
 
       // 1問を画面に追加する関数
       function displayQuizQuestion(question, index) {
@@ -652,9 +736,11 @@
         correctCount = 0;
         totalQuestions = 0;
         generationFinished = false;
+        quizResultSaved = false;
 
         quizQuestion.innerHTML = "";
         quizResult.innerHTML = "";
+        quizFeedback.textContent = "";
 
         generateQuizButton.disabled = true;
 
@@ -707,9 +793,8 @@
 
                 const index = totalQuestions;
 
-                totalQuestions++;
-
                 displayQuizQuestion(question, index);
+                totalQuestions++;
               } catch (error) {
                 console.error("JSONの解析に失敗しました:", line, error);
               }
@@ -725,12 +810,17 @@
 
               const index = totalQuestions;
 
-              totalQuestions++;
-
               displayQuizQuestion(question, index);
+              totalQuestions++;
             } catch (error) {
               console.error("最後のJSONの解析に失敗しました:", buffer, error);
             }
+          }
+
+          if (totalQuestions !== 10) {
+            throw new Error(
+              `問題を10問生成できませんでした（${totalQuestions}問受信）。もう一度「復習テストを生成」を押してください。`,
+            );
           }
 
           generationFinished = true;
@@ -739,8 +829,7 @@
         } catch (error) {
           console.error(error);
 
-          quizQuestion.innerHTML =
-            "<p>復習テストの生成中にエラーが発生しました。</p>";
+          quizFeedback.textContent = error.message;
         } finally {
           generateQuizButton.disabled = false;
 
@@ -778,21 +867,19 @@
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
 
-        while (true) {
+                while (true) {
           const { done, value } = await reader.read();
+
           if (done) {
             break;
           }
+
           const chunk = decoder.decode(value, { stream: true });
+
           markdownText += chunk;
+
           const html = marked.parse(markdownText);
           assistantMessage.innerHTML = DOMPurify.sanitize(html);
         }
-        assistantMessage.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
       });
     </script>
-  </body>
-</html>

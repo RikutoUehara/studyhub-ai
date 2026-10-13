@@ -84,6 +84,17 @@ button {
   margin-bottom: 15px;
 }
 
+.lecture-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.lecture-score {
+  min-width: 140px;
+  text-align: right;
+}
+
 .summary {
   text-align: left;
   max-width: 900px;

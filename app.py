@@ -22,6 +22,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from flask_login import LoginManager, UserMixin, login_user, current_user, login_required, logout_user
 
+from datetime import datetime
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -102,6 +104,29 @@ class ChatMessage(db.Model):
     role = db.Column(db.String(20))
     content = db.Column(db.Text)
 
+class QuizAttempt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    lecture_id = db.Column(
+        db.Integer,
+        db.ForeignKey("lecture.id"),
+        nullable=False
+    )
+
+    score = db.Column(db.Integer, nullable=False)
+    total_questions = db.Column(db.Integer, nullable=False)
+
+    completed_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.now
+    )
+
+    lecture = db.relationship(
+        "Lecture",
+        backref="quiz_attempts"
+    )
+
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
@@ -174,36 +199,108 @@ def menu():
 def course():
     if request.method == "POST":
         course_name = request.form["course_name"]
+
         new_course = Course(
-            name=course_name, 
+            name=course_name,
             user_id=current_user.id
-            )
+        )
+
         db.session.add(new_course)
         db.session.commit()
 
         for week in range(1, 16):
-            lecture = Lecture(course_id=new_course.id, 
-                              week=week)
+            lecture = Lecture(
+                course_id=new_course.id,
+                week=week
+            )
             db.session.add(lecture)
+
         db.session.commit()
 
     courses = Course.query.filter_by(
         user_id=current_user.id
     ).all()
-    return render_template("course.html", 
-                           courses=courses)
+
+    # Courseごとの平均得点率
+    course_average_scores = {}
+
+    for course_item in courses:
+        latest_percentages = []
+
+        for lecture_item in course_item.lectures:
+            latest_attempt = (
+                QuizAttempt.query
+                .filter_by(lecture_id=lecture_item.id)
+                .order_by(QuizAttempt.completed_at.desc())
+                .first()
+            )
+
+            if latest_attempt:
+                percentage = (
+                    latest_attempt.score
+                    / latest_attempt.total_questions
+                    * 100
+                )
+
+                latest_percentages.append(percentage)
+
+        if latest_percentages:
+            course_average_scores[course_item.id] = round(
+                sum(latest_percentages) / len(latest_percentages)
+            )
+        else:
+            course_average_scores[course_item.id] = None
+
+    return render_template(
+        "course.html",
+        courses=courses,
+        course_average_scores=course_average_scores
+    )
 
 @app.route("/lecture/<int:course_id>")
+@login_required
 def lecture(course_id):
-    course = Course.query.get(course_id)
+    course = db.session.get(Course, course_id)
+
+    if course is None:
+        abort(404)
+
+    if course.user_id != current_user.id:
+        abort(403)
+
     lectures = Lecture.query.filter_by(course_id=course_id).all()
+
+    latest_scores = {}
+
+    for lecture_item in lectures:
+        latest_attempt = (
+            QuizAttempt.query
+            .filter_by(lecture_id=lecture_item.id)
+            .order_by(QuizAttempt.completed_at.desc())
+            .first()
+        )
+
+        if latest_attempt:
+            percentage = round(
+                latest_attempt.score
+                / latest_attempt.total_questions
+                * 100
+            )
+
+            latest_scores[lecture_item.id] = percentage
+
+        else:
+            latest_scores[lecture_item.id] = None
+
     return render_template(
-        "lecture.html", 
-        course=course, 
-        lectures=lectures
+        "lecture.html",
+        course=course,
+        lectures=lectures,
+        latest_scores=latest_scores
     )
 
 @app.route("/lecture/<int:lecture_id>/upload", methods=["GET", "POST"])
+@login_required
 def upload_lecture(lecture_id):
     lecture = db.session.get(Lecture, lecture_id)
 
@@ -212,6 +309,7 @@ def upload_lecture(lecture_id):
 
     if lecture.course.user_id != current_user.id:
         abort(403, description="アクセスが許可されていません")
+
     if request.method == "POST":
         pdf = request.files["pdf"]
 
@@ -244,9 +342,11 @@ def upload_lecture(lecture_id):
 
         return jsonify({
             "success": True,
-            "pdf_url": url_for("uploaded_file",filename=filename),
+            "pdf_url": url_for("uploaded_file", filename=filename),
             "text": text
         })
+
+    # ---------- GETの場合 ----------
 
     messages = ChatMessage.query.filter_by(
         lecture_id=lecture.id
@@ -263,11 +363,29 @@ def upload_lecture(lecture_id):
         extensions=["tables", "fenced_code"]
     )
 
+    quiz_attempts = (
+        QuizAttempt.query
+        .filter_by(lecture_id=lecture.id)
+        .order_by(QuizAttempt.completed_at.asc())
+        .all()
+    )
+
+    quiz_score_data = []
+
+    for attempt in quiz_attempts:
+        quiz_score_data.append({
+            "label": attempt.completed_at.strftime("%m/%d %H:%M"),
+            "score": round(
+                attempt.score / attempt.total_questions * 100
+            )
+        })
+
     return render_template(
         "upload.html",
         lecture=lecture,
         summary_html=summary_html,
-        messages=messages
+        messages=messages,
+        quiz_score_data=quiz_score_data
     )
 
 def generate_summary_stream(lecture, instruction=None):
@@ -511,15 +629,14 @@ Markdownや前置きは不要です。
 
 {{"type":"keyword","question":"問題文","answer":"短い語句","explanation":"解説"}}
 
-{{"type":"written","question":"問題文","model_answer":"模範解答","rubric":["必須論点1","必須論点2","必須論点3"]}}
-
 問題作成ルール：
+・問題形式は multiple_choice、true_false、keyword の3種類のみを使用してください。
 ・multiple_choice は4択問題にしてください。
 ・true_false は正誤問題にしてください。
 ・keyword は、専門用語・人名・制度名・出来事の名称などを答える問題にしてください。
 ・keyword の answer は、必ず単語または短い語句にしてください。
 ・keyword の answer を文章にしないでください。
-・written は、文章で説明する必要がある問題にしてください。
+・記述式（written）は出題せず、説明を求めたい内容はキーワード問題や正誤問題に置き換えてください。
 ・合計で10問にしてください。
 ・授業資料に書かれていない内容を推測して問題にしないでください。
 
@@ -653,7 +770,43 @@ def check_written(lecture_id):
     
     return jsonify(ai_result)
     
+@app.route("/lecture/<int:lecture_id>/quiz/result", methods=["POST"])
+@login_required
+def save_quiz_result(lecture_id):
+    lecture = db.session.get(Lecture, lecture_id)
 
+    if lecture is None:
+        abort(404)
+
+    if lecture.course.user_id != current_user.id:
+        abort(403)
+
+    data = request.get_json()
+
+    score = data.get("score")
+    total_questions = data.get("total_questions")
+
+    if not isinstance(score, int) or not isinstance(total_questions, int):
+        return jsonify({"error": "Invalid score"}), 400
+
+    if total_questions <= 0 or score < 0 or score > total_questions:
+        return jsonify({"error": "Invalid score"}), 400
+
+    attempt = QuizAttempt(
+        lecture_id=lecture.id,
+        score=score,
+        total_questions=total_questions
+    )
+
+    db.session.add(attempt)
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "attempt_id": attempt.id,
+        "label": attempt.completed_at.strftime("%m/%d %H:%M"),
+        "score": round(attempt.score / attempt.total_questions * 100)
+    })
 
 if __name__ == "__main__":
 
