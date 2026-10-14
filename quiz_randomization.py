@@ -1,0 +1,23 @@
+"""Randomize answer positions without changing the correct answer."""
+import json
+import secrets
+
+
+def randomized_question(line):
+    question = json.loads(line)
+    if question.get("type") == "multiple_choice":
+        choices = question.get("choices")
+        if (not isinstance(choices, list) or len(choices) != 4
+                or not all(isinstance(choice, str) for choice in choices)
+                or len(set(choices)) != 4 or question.get("answer") not in choices):
+            raise ValueError("Invalid multiple-choice question")
+        secrets.SystemRandom().shuffle(choices)
+    elif question.get("type") == "true_false":
+        if type(question.get("answer")) is not bool:
+            raise ValueError("Invalid true/false answer")
+    elif question.get("type") == "keyword":
+        if not isinstance(question.get("answer"), str) or not question["answer"].strip():
+            raise ValueError("Invalid keyword answer")
+    else:
+        raise ValueError("Unsupported question type")
+    return json.dumps(question, ensure_ascii=False)

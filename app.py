@@ -26,6 +26,7 @@ from flask_login import LoginManager, UserMixin, login_user, current_user, login
 
 from datetime import datetime
 from production_config import configure
+from quiz_randomization import randomized_question
 
 load_dotenv()
 
@@ -632,6 +633,9 @@ Markdownや前置きは不要です。
 ・問題形式は multiple_choice、true_false、keyword の3種類のみを使用してください。
 ・multiple_choice は4択問題にしてください。
 ・true_false は正誤問題にしてください。
+・問題数は4択4問、正誤4問、キーワード2問にしてください。出題順は混ぜてください。
+・正誤4問は正解trueを2問、falseを2問にしてください。falseの問題文は資料に基づく明確な誤りを含め、解説で正しい内容を説明してください。
+・正解の値だけを反転してはいけません。問題文・正解・解説の内容を一致させてください。
 ・keyword は、専門用語・人名・制度名・出来事の名称などを答える問題にしてください。
 ・keyword の answer は、必ず単語または短い語句にしてください。
 ・keyword の answer を文章にしないでください。
@@ -658,12 +662,12 @@ Markdownや前置きは不要です。
                     line = line.strip()
 
                     if line:
-                        yield line + "\n"
+                        yield randomized_question(line) + "\n"
 
         buffer = buffer.strip()
 
         if buffer:
-            yield buffer + "\n"
+            yield randomized_question(buffer) + "\n"
 
     return Response(
         stream_with_context(generate()),
