@@ -16,7 +16,7 @@
       <a href="{{ url_for('course')}}" class="button"> 学習を始める </a>
 
       <div class="logout-area">
-        <a href="{{ url_for('logout') }}">ログアウト</a>
+        <form method="POST" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ security_csrf_token() }}"><button type="submit">ログアウト</button></form>
       </div>
     </div>
   </body>

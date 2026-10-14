@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ title }} | 単位トルトル君</title></head>
+  <body>
+    <h1>{{ title }}</h1>
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+    <form method="POST">
+      <input type="hidden" name="csrf_token" value="{{ auth_csrf_token() }}">
+      {% if mode == 'email' %}
+      <label for="email">登録メールアドレス</label>
+      <input id="email" name="email" type="email" maxlength="100" autocomplete="email" required>
+      {% elif mode == 'password' %}
+      <p>パスワードは8〜128文字で入力してください。</p>
+      <p><label for="password">新しいパスワード</label>
+      <input id="password" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></p>
+      <p><label for="password_confirm">パスワード（確認）</label>
+      <input id="password_confirm" name="password_confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></p>
+      {% else %}
+      <p>ボタンを押してメールアドレスを認証してください。</p>
+      {% endif %}
+      <button type="submit">{{ button }}</button>
+    </form>
+    <p><a href="{{ url_for('login') }}">ログインに戻る</a></p>
+  </body>
+</html>

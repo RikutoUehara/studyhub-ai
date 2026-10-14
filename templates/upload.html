@@ -20,7 +20,9 @@
         method="POST"
         enctype="multipart/form-data"
       >
-        <input type="file" name="pdf" accept=".pdf" />
+        <input type="hidden" name="csrf_token" value="{{ pdf_csrf_token() }}" />
+        <input type="file" name="pdf" accept=".pdf" required />
+        <p>PDFは最大{{ config['PDF_MAX_BYTES'] // 1048576 }} MiB・{{ config['PDF_MAX_PAGES'] }}ページです。暗号化PDFはアップロードできません。</p>
 
         {% if error %}
         <p>{{ error }}</p>
@@ -115,9 +117,10 @@
         </div>
         <div id="pdf-content" class="tab-content" style="display: none">
           {% if lecture.pdf_filename %}
+          <p><a href="{{ url_for('lecture_pdf', lecture_id=lecture.id, download=1) }}">PDFをダウンロード</a></p>
 
           <iframe
-            src="{{ url_for('uploaded_file', filename=lecture.pdf_filename) }}"
+            src="{{ url_for('lecture_pdf', lecture_id=lecture.id) }}"
             width="100%"
             height="900px"
           >
@@ -225,7 +228,7 @@
         errorArea.textContent = "";
         try {
           const formData = new FormData(uploadForm);
-          const response = await fetch(uploadForm.action, {
+          const response = await secureFetch(uploadForm.action, {
             method: "POST",
             body: formData,
           });
@@ -234,6 +237,7 @@
             throw new Error(data.error || "アップロードに失敗しました");
           }
           if (data.success) {
+            markListsUpdated();
             updatePdfViewer(data.pdf_url);
             updateExtractedText(data.text);
             await streamSummary();
@@ -246,6 +250,25 @@
           uploadButton.disabled = false;
         }
       });
+
+      const securityCsrf = {{ security_csrf_token() | tojson }};
+      async function secureFetch(url, options = {}) {
+        const headers = new Headers(options.headers || {});
+        if ((options.method || "GET").toUpperCase() === "POST") {
+          headers.set("X-CSRF-Token", securityCsrf);
+        }
+        const response = await fetch(url, { ...options, headers });
+        if (response.redirected && new URL(response.url).pathname === "{{ url_for('login') }}") {
+          window.location.href = response.url;
+          throw new Error("Please log in again.");
+        }
+        if (!response.ok) {
+          let message = "Request failed. Reload the page and try again.";
+          try { const data = await response.json(); message = data.error || message; } catch (_) {}
+          throw new Error(message);
+        }
+        return response;
+      }
 
       async function displayStream(response) {
         const summaryArea = document.getElementById("summary-stream");
@@ -269,7 +292,7 @@
       reanalyzeForm.addEventListener("submit", async function (event) {
         event.preventDefault();
         const formData = new FormData(reanalyzeForm);
-        const response = await fetch(reanalyzeForm.action, {
+        const response = await secureFetch(reanalyzeForm.action, {
           method: "POST",
           body: formData,
         });
@@ -284,6 +307,12 @@
       function updatePdfViewer(pdfUrl) {
         const pdfContent = document.getElementById("pdf-content");
         pdfContent.innerHTML = "";
+        const download = document.createElement("a");
+        download.href = pdfUrl + "?download=1";
+        download.textContent = "PDFをダウンロード";
+        const downloadArea = document.createElement("p");
+        downloadArea.appendChild(download);
+        pdfContent.appendChild(downloadArea);
         const iframe = document.createElement("iframe");
         iframe.src = pdfUrl + "?t=" + Date.now();
         iframe.width = "100%";
@@ -323,8 +352,9 @@
       }
 
       async function streamSummary() {
-        const response = await fetch(
+        const response = await secureFetch(
           "{{ url_for('stream_summary', lecture_id=lecture.id) }}",
+          { method: "POST" },
         );
         await displayStream(response);
       }
@@ -345,8 +375,16 @@
       let generationFinished = false;
       let quizResultSaved = false;
 
+      function markListsUpdated() {
+        try {
+          localStorage.setItem("studyhub-list-version", Date.now() + "-" + Math.random());
+        } catch (error) {
+          console.warn("List refresh notification unavailable", error);
+        }
+      }
+
       async function saveQuizResult() {
-  const response = await fetch(
+  const response = await secureFetch(
     "{{ url_for('save_quiz_result', lecture_id=lecture.id) }}",
     {
       method: "POST",
@@ -399,6 +437,7 @@
 
       try {
         const result = await saveQuizResult();
+        markListsUpdated();
         quizScoreChart.data.labels.push(result.label);
         quizScoreChart.data.datasets[0].data.push(result.score);
         quizScoreChart.update();
@@ -465,7 +504,7 @@
               }
 
               feedback.innerHTML +=
-                "<p><strong>解説：</strong>" + question.explanation + "</p>";
+                DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
               feedback.scrollIntoView({
                 behavior: "smooth",
@@ -519,7 +558,7 @@
             }
 
             feedback.innerHTML +=
-              "<p><strong>解説：</strong>" + question.explanation + "</p>";
+              DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
             feedback.scrollIntoView({
               behavior: "smooth",
@@ -580,7 +619,7 @@
               feedback.textContent = "⭕ 正解！";
 
               feedback.innerHTML +=
-                "<p><strong>解説：</strong>" + question.explanation + "</p>";
+                DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
               feedback.scrollIntoView({
                 behavior: "smooth",
@@ -597,7 +636,7 @@
 
               answerButton.disabled = true;
 
-              fetch("{{ url_for('check_keyword', lecture_id=lecture.id) }}", {
+              secureFetch("{{ url_for('check_keyword', lecture_id=lecture.id) }}", {
                 method: "POST",
                 body: formData,
               })
@@ -619,9 +658,9 @@
                   }
 
                   feedback.innerHTML +=
-                    "<p><strong>解説：</strong>" +
+                    DOMPurify.sanitize("<p><strong>解説：</strong>" +
                     question.explanation +
-                    "</p>";
+                    "</p>");
 
                   feedback.scrollIntoView({
                     behavior: "smooth",
@@ -675,7 +714,7 @@
 
             answerButton.disabled = true;
 
-            fetch("{{ url_for('check_written', lecture_id=lecture.id) }}", {
+            secureFetch("{{ url_for('check_written', lecture_id=lecture.id) }}", {
               method: "POST",
               body: formData,
             })
@@ -693,7 +732,7 @@
                 }
 
                 feedback.innerHTML =
-                  "<p>" +
+                  DOMPurify.sanitize("<p>" +
                   (data.is_correct ? "⭕ 正解！" : "❌ 不正解！") +
                   "</p>" +
                   "<p><strong>得点：</strong>" +
@@ -706,7 +745,7 @@
                   "</p>" +
                   "<p><strong>模範解答：</strong>" +
                   question.model_answer +
-                  "</p>";
+                  "</p>");
 
                 feedback.scrollIntoView({
                   behavior: "smooth",
@@ -747,7 +786,7 @@
         generateQuizButton.textContent = "問題を生成中...";
 
         try {
-          const response = await fetch(
+          const response = await secureFetch(
             "{{ url_for('generate_quiz', lecture_id=lecture.id) }}",
             {
               method: "POST",
@@ -859,7 +898,7 @@
 
         let markdownText = "";
 
-        const response = await fetch(chatForm.action, {
+        const response = await secureFetch(chatForm.action, {
           method: "POST",
           body: formData,
         });

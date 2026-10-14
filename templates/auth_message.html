@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ja">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>単位トルトル君</title></head>
+  <body>
+    <h1>単位トルトル君</h1>
+    <p role="status">{{ message }}</p>
+    <p><a href="{{ url_for('login') }}">ログイン</a></p>
+    <p><a href="{{ url_for('resend_verification') }}">認証メールを再送する</a></p>
+    <p><a href="{{ url_for('forgot_password') }}">パスワードを再設定する</a></p>
+  </body>
+</html>

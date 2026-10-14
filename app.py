@@ -1,6 +1,6 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, abort
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, abort, session
 
-from pypdf import PdfReader
+from pdf_routes import install_pdf_routes
 
 from dotenv import load_dotenv
 
@@ -8,13 +8,15 @@ from openai import OpenAI
 
 import os
 
-import markdown
+from web_security import install_security, safe_markdown
 
 from flask_sqlalchemy import SQLAlchemy
 
-from flask import send_from_directory
 
 import json
+import secrets
+import httpx
+from email_auth import install_email_auth
 
 import time
 
@@ -23,6 +25,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, UserMixin, login_user, current_user, login_required, logout_user
 
 from datetime import datetime
+from production_config import configure
 
 load_dotenv()
 
@@ -33,6 +36,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+configure(app)
 
 db = SQLAlchemy(app)
 
@@ -42,7 +46,10 @@ login_manager.login_view = "login"
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    user = db.session.get(User, int(user_id))
+    if user and email_auth["verified"](user) and session.get("auth_version", 0) == email_auth["version"](user):
+        return user
+    return None
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -68,7 +75,8 @@ class Course(db.Model):
     lectures = db.relationship(
         "Lecture",
         backref="course",
-        lazy="select"
+        lazy="select",
+        cascade="all, delete-orphan"
     )
 
 class Lecture(db.Model):
@@ -84,7 +92,8 @@ class Lecture(db.Model):
 
     messages = db.relationship(
     "ChatMessage",
-    backref="lecture"
+    backref="lecture",
+    cascade="all, delete-orphan"
 )
 
     pdf_filename = db.Column(db.String(255))
@@ -124,43 +133,43 @@ class QuizAttempt(db.Model):
 
     lecture = db.relationship(
         "Lecture",
-        backref="quiz_attempts"
+        backref=db.backref("quiz_attempts", cascade="all, delete-orphan")
     )
 
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
+email_auth = install_email_auth(app, db, User)
+pdf_service = install_pdf_routes(app, db, Lecture)
+lecture_owner = install_security(app, db, Lecture)
+
+@app.cli.command("init-db")
+def init_db():
+    """Create missing tables without changing existing records."""
+    db.create_all()
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-
-        # 入力チェック
-        if not email or not password:
-            return "メールアドレスとパスワードを入力してください", 400
-
-        # 同じメールアドレスが既に登録されていないか確認
-        existing_user = User.query.filter_by(email=email).first()
-
-        if existing_user:
-            return "このメールアドレスは既に登録されています", 400
-
-        # パスワードをハッシュ化
-        password_hash = generate_password_hash(password)
-
-        # Userを作成
-        user = User(
-            email=email,
-            password_hash=password_hash
-        )
-
+        if not email_auth["valid_email"](email) or not 8 <= len(password) <= 128:
+            return render_template("register.html", error="正しいメールアドレスと8〜128文字のパスワードを入力してください。"), 400
+        if email_auth["find_user"](email):
+            return email_auth["notice"]("既に登録されている場合は、ログインまたは認証メールの再送をお試しください。")
+        user = User(email=email, password_hash=generate_password_hash(password))
         db.session.add(user)
+        db.session.flush()
+        db.session.add(email_auth["State"](user_id=user.id, verified=False))
         db.session.commit()
-
-        return redirect(url_for("login"))
-
+        try:
+            email_auth["send_link"](user, "verify")
+        except (httpx.HTTPError, RuntimeError):
+            db.session.rollback()
+            app.logger.error("Registration email delivery failed")
+            return email_auth["notice"]("アカウントを作成しましたが、メールを送信できませんでした。認証メールの再送をお試しください。", 503)
+        return email_auth["notice"]("認証メールを送信しました。24時間以内にメールのリンクを開いて認証してください。")
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -169,9 +178,13 @@ def login():
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
 
-        user = User.query.filter_by(email=email).first()
+        user = email_auth["find_user"](email)
 
         if user and check_password_hash(user.password_hash, password):
+            if not email_auth["verified"](user):
+                return email_auth["notice"]("メールアドレスの認証が必要です。受信箱を確認するか、認証メールを再送してください。", 403)
+            session.clear()
+            session["auth_version"] = email_auth["version"](user)
             login_user(user)
             return redirect(url_for("home"))
 
@@ -179,7 +192,7 @@ def login():
 
     return render_template("login.html")
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
@@ -194,6 +207,25 @@ def home():
 def menu():
     return render_template("menu.html")
 
+def latest_quiz_percentages(course_ids):
+    ranked = (
+        db.session.query(
+            Lecture.course_id,
+            QuizAttempt.lecture_id,
+            QuizAttempt.score,
+            QuizAttempt.total_questions,
+            db.func.row_number().over(
+                partition_by=QuizAttempt.lecture_id,
+                order_by=(QuizAttempt.completed_at.desc(), QuizAttempt.id.desc())
+            ).label("rank")
+        )
+        .join(Lecture, Lecture.id == QuizAttempt.lecture_id)
+        .filter(Lecture.course_id.in_(course_ids))
+        .subquery()
+    )
+    return db.session.query(ranked).filter(ranked.c.rank == 1).all()
+
+
 @app.route("/course", methods=["GET", "POST"])
 @login_required
 def course():
@@ -206,7 +238,7 @@ def course():
         )
 
         db.session.add(new_course)
-        db.session.commit()
+        db.session.flush()
 
         for week in range(1, 16):
             lecture = Lecture(
@@ -216,46 +248,55 @@ def course():
             db.session.add(lecture)
 
         db.session.commit()
+        return redirect(url_for("course"))
 
     courses = Course.query.filter_by(
         user_id=current_user.id
     ).all()
 
     # Courseごとの平均得点率
-    course_average_scores = {}
-
-    for course_item in courses:
-        latest_percentages = []
-
-        for lecture_item in course_item.lectures:
-            latest_attempt = (
-                QuizAttempt.query
-                .filter_by(lecture_id=lecture_item.id)
-                .order_by(QuizAttempt.completed_at.desc())
-                .first()
+    percentages = {item.id: [] for item in courses}
+    if courses:
+        for attempt in latest_quiz_percentages(list(percentages)):
+            percentages[attempt.course_id].append(
+                attempt.score / attempt.total_questions * 100
             )
+    course_average_scores = {
+        course_id: round(sum(scores) / len(scores)) if scores else None
+        for course_id, scores in percentages.items()
+    }
 
-            if latest_attempt:
-                percentage = (
-                    latest_attempt.score
-                    / latest_attempt.total_questions
-                    * 100
-                )
-
-                latest_percentages.append(percentage)
-
-        if latest_percentages:
-            course_average_scores[course_item.id] = round(
-                sum(latest_percentages) / len(latest_percentages)
-            )
-        else:
-            course_average_scores[course_item.id] = None
+    if "course_delete_token" not in session:
+        session["course_delete_token"] = secrets.token_hex(32)
 
     return render_template(
         "course.html",
         courses=courses,
         course_average_scores=course_average_scores
     )
+
+@app.route("/course/<int:course_id>/delete", methods=["POST"])
+@login_required
+def delete_course(course_id):
+    course = Course.query.filter_by(id=course_id).with_for_update().populate_existing().first()
+    if course is None:
+        abort(404)
+    if course.user_id != current_user.id:
+        abort(403)
+
+    token = session.get("course_delete_token")
+    if not token or not secrets.compare_digest(
+        token, request.form.get("csrf_token", "")
+    ):
+        abort(400)
+
+    for item in course.lectures:
+        pdf_service["enqueue"](item.pdf_filename)
+    db.session.delete(course)
+    db.session.commit()
+    pdf_service["cleanup"]()
+    return redirect(url_for("course"))
+
 
 @app.route("/lecture/<int:course_id>")
 @login_required
@@ -268,29 +309,18 @@ def lecture(course_id):
     if course.user_id != current_user.id:
         abort(403)
 
-    lectures = Lecture.query.filter_by(course_id=course_id).all()
+    lectures = (
+        db.session.query(Lecture.id, Lecture.week, Lecture.pdf_filename)
+        .filter(Lecture.course_id == course_id)
+        .order_by(Lecture.week.asc(), Lecture.id.asc())
+        .all()
+    )
 
-    latest_scores = {}
-
-    for lecture_item in lectures:
-        latest_attempt = (
-            QuizAttempt.query
-            .filter_by(lecture_id=lecture_item.id)
-            .order_by(QuizAttempt.completed_at.desc())
-            .first()
+    latest_scores = {item.id: None for item in lectures}
+    for attempt in latest_quiz_percentages([course_id]):
+        latest_scores[attempt.lecture_id] = round(
+            attempt.score / attempt.total_questions * 100
         )
-
-        if latest_attempt:
-            percentage = round(
-                latest_attempt.score
-                / latest_attempt.total_questions
-                * 100
-            )
-
-            latest_scores[lecture_item.id] = percentage
-
-        else:
-            latest_scores[lecture_item.id] = None
 
     return render_template(
         "lecture.html",
@@ -311,40 +341,7 @@ def upload_lecture(lecture_id):
         abort(403, description="アクセスが許可されていません")
 
     if request.method == "POST":
-        pdf = request.files["pdf"]
-
-        if pdf.filename == "":
-            return jsonify({
-                "success": False,
-                "error": "ファイルを選択してください"
-            }), 400
-
-        filename = pdf.filename
-        filepath = os.path.join("uploads", filename)
-
-        pdf.save(filepath)
-
-        lecture.pdf_filename = filename
-
-        reader = PdfReader(filepath)
-
-        text = ""
-
-        for page in reader.pages:
-            page_text = page.extract_text()
-
-            if page_text:
-                text += page_text + "\n"
-
-        lecture.text = text
-
-        db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "pdf_url": url_for("uploaded_file", filename=filename),
-            "text": text
-        })
+        return pdf_service["upload"](lecture)
 
     # ---------- GETの場合 ----------
 
@@ -353,15 +350,9 @@ def upload_lecture(lecture_id):
     ).all()
 
     for message in messages:
-        message.content_html = markdown.markdown(
-            message.content or "",
-            extensions=["tables", "fenced_code"]
-        )
+        message.content_html = safe_markdown(message.content)
 
-    summary_html = markdown.markdown(
-        lecture.summary or "",
-        extensions=["tables", "fenced_code"]
-    )
+    summary_html = safe_markdown(lecture.summary)
 
     quiz_attempts = (
         QuizAttempt.query
@@ -468,10 +459,15 @@ def generate_summary_stream(lecture, instruction=None):
 
     summary = "".join(summary_parts)
 
+    # ストリーミング開始前のオブジェクトはセッションから外れるため、再取得する。
+    lecture = db.session.get(Lecture, lecture.id)
+    if lecture is None:
+        return
     lecture.summary = summary
     db.session.commit()
 
-@app.route("/lecture/<int:lecture_id>/summary-stream")
+@app.route("/lecture/<int:lecture_id>/summary-stream", methods=["POST"])
+@lecture_owner
 def stream_summary(lecture_id):
 
     lecture = Lecture.query.get(lecture_id)
@@ -483,6 +479,7 @@ def stream_summary(lecture_id):
         mimetype="text/plain"
     )
 @app.route("/lecture/<int:lecture_id>/reanalyze", methods=["POST"])
+@lecture_owner
 def reanalyze_lecture(lecture_id):
 
     lecture = Lecture.query.get(lecture_id)
@@ -503,6 +500,7 @@ def reanalyze_lecture(lecture_id):
     )
 
 @app.route("/lecture/<int:lecture_id>/chat", methods=["POST"])
+@lecture_owner
 def chat(lecture_id):
     lecture = Lecture.query.get(lecture_id)
 
@@ -596,9 +594,10 @@ def chat(lecture_id):
 
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):
-    return send_from_directory("uploads", filename)
+    abort(404)
 
 @app.route("/lecture/<int:lecture_id>/quiz/generate", methods=["POST"])
+@lecture_owner
 def generate_quiz(lecture_id):
 
     lecture = Lecture.query.get(lecture_id)
@@ -672,13 +671,12 @@ Markdownや前置きは不要です。
     )
 
 @app.route("/lecture/<int:lecture_id>/quiz/keyword/check", methods=["POST"])
+@lecture_owner
 def check_keyword(lecture_id):
 
     user_answer = request.form.get("user_answer")
     correct_answer = request.form.get("correct_answer")
 
-    print("ユーザー回答:", user_answer)
-    print("模範解答:", correct_answer)
 
     response = client.chat.completions.create(
         model="gpt-5.4-nano",
@@ -706,13 +704,13 @@ def check_keyword(lecture_id):
 
     ai_result = response.choices[0].message.content.strip()
 
-    print("AI判定:", ai_result)
 
     return jsonify({
         "is_correct": ai_result.lower() == "true"
     })
 
 @app.route("/lecture/<int:lecture_id>/quiz/written/check", methods=["POST"])
+@lecture_owner
 def check_written(lecture_id):
 
     user_answer = request.form.get("user_answer")
@@ -721,9 +719,6 @@ def check_written(lecture_id):
     rubric = json.loads(rubric)
     # 文字列から配列に
 
-    print("ユーザー回答:", user_answer)
-    print("模範解答:", model_answer)
-    print("採点基準:", rubric)
 
     response = client.chat.completions.create(
         model="gpt-5.4-nano",
@@ -764,9 +759,7 @@ def check_written(lecture_id):
     )
 
     ai_result = response.choices[0].message.content
-    print("AIの生回答", ai_result)
     ai_result = json.loads(ai_result)
-    print("AI採点結果:", ai_result)
     
     return jsonify(ai_result)
     
@@ -781,12 +774,14 @@ def save_quiz_result(lecture_id):
     if lecture.course.user_id != current_user.id:
         abort(403)
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid result"), 400
 
     score = data.get("score")
     total_questions = data.get("total_questions")
 
-    if not isinstance(score, int) or not isinstance(total_questions, int):
+    if type(score) is not int or type(total_questions) is not int:
         return jsonify({"error": "Invalid score"}), 400
 
     if total_questions <= 0 or score < 0 or score > total_questions:
@@ -812,4 +807,4 @@ if __name__ == "__main__":
 
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1")

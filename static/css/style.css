@@ -75,8 +75,7 @@ button {
   line-height: 1.8;
 }
 
-.lecture-item,
-.course-item {
+.lecture-item {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,10 +83,69 @@ button {
   margin-bottom: 15px;
 }
 
+.course-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px 56px;
+  align-items: center;
+  gap: 16px;
+  max-width: 720px;
+  margin: 0 auto 15px;
+}
+
+.course-item > a {
+  min-width: 0;
+}
+
+.course-item > a > button {
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.course-score {
+  text-align: right;
+}
+
+@media (max-width: 540px) {
+  .course-item {
+    grid-template-columns: minmax(0, 1fr) 56px;
+    gap: 8px 12px;
+  }
+
+  .course-item > a {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .course-item > form {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+
+  .course-score {
+    grid-column: 1;
+    grid-row: 2;
+    text-align: left;
+  }
+}
+
 .lecture-actions {
   display: flex;
   align-items: center;
   gap: 20px;
+}
+
+.delete-button {
+  background-color: #e5e7eb;
+  color: #4b5563;
+  padding: 6px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.delete-button:hover {
+  background-color: #d1d5db;
 }
 
 .lecture-score {

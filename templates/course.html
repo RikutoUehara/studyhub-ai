@@ -14,6 +14,7 @@
     <h1>授業管理</h1>
 
     <form method="POST">
+      <input type="hidden" name="csrf_token" value="{{ security_csrf_token() }}">
       <p>授業名</p>
 
       <input type="text" name="course_name" required />
@@ -45,8 +46,18 @@
       <span class="course-score"> 平均得点率：未実施 </span>
 
       {% endif %}
+      <form
+        method="POST"
+        action="{{ url_for('delete_course', course_id=course.id) }}"
+        data-course-name="{{ course.name }}"
+        onsubmit="return confirm('「' + this.dataset.courseName + '」を本当に削除しますか？\n全15回の講義・分析内容・チャット履歴・テスト結果も削除され、元に戻せません。');"
+      >
+        <input type="hidden" name="csrf_token" value="{{ session['course_delete_token'] }}" />
+        <button type="submit" class="delete-button">削除</button>
+      </form>
     </div>
 
     {% endfor %}
+    <script src="{{ url_for('static', filename='js/list-refresh.js') }}"></script>
   </body>
 </html>
