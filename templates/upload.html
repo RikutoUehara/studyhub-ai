@@ -2,6 +2,7 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PDFアップロード</title>
 
     <link
@@ -13,6 +14,7 @@
   <body>
     <div class="upload">
       <h2>{{ lecture.week }}回の授業資料アップロード</h2>
+      <p>PDFは1日20回・保存合計100 MiBまでです。AIチャットは資料の一部と直近の会話を参照します。</p>
 
       <form
         id="upload-form"
@@ -44,6 +46,7 @@
     </div>
 
     <hr />
+    {% include '_ai_usage.html' %}
 
     <div class="pdf-text">
       <details>
@@ -73,7 +76,7 @@
 
       <br /><br />
 
-      <button type="submit">この指示で再分析</button>
+      <button type="submit" data-ai-feature="summary">この指示で再分析</button>
     </form>
 
     <div class="workspace">
@@ -135,7 +138,7 @@
         <div id="quiz-content" class="tab-content" style="display: none">
           <h2>復習テスト</h2>
 
-          <button type="button" id="generate-quiz-button">
+          <button type="button" id="generate-quiz-button" data-ai-feature="quiz">
             復習テストを生成
           </button>
 
@@ -169,7 +172,7 @@
           method="POST"
         >
           <textarea name="message" placeholder="AIに質問する"> </textarea>
-          <button type="submit">送信</button>
+          <button type="submit" data-ai-feature="chat">送信</button>
         </form>
       </div>
     </div>
@@ -240,7 +243,13 @@
             markListsUpdated();
             updatePdfViewer(data.pdf_url);
             updateExtractedText(data.text);
-            await streamSummary();
+            await window.refreshAIUsage?.();
+            if (!window.aiUsageReason?.("summary")) {
+              await streamSummary();
+            } else {
+              errorArea.textContent = window.aiUsageReason("summary");
+              errorArea.style.display = "block";
+            }
           }
         } catch (error) {
           errorArea.textContent = error.message;
@@ -256,8 +265,14 @@
         const headers = new Headers(options.headers || {});
         if ((options.method || "GET").toUpperCase() === "POST") {
           headers.set("X-CSRF-Token", securityCsrf);
+          headers.set("Idempotency-Key", crypto.randomUUID());
         }
+        const feature = url.includes("summary-stream") || url.includes("reanalyze") ? "summary" :
+          url.includes("/chat") ? "chat" : url.includes("quiz/generate") ? "quiz" :
+          url.includes("/check") ? "grading" : null;
+        if (feature && window.aiUsageReason?.(feature)) throw new Error(window.aiUsageReason(feature));
         const response = await fetch(url, { ...options, headers });
+        await window.refreshAIUsage?.();
         if (response.redirected && new URL(response.url).pathname === "{{ url_for('login') }}") {
           window.location.href = response.url;
           throw new Error("Please log in again.");
@@ -279,10 +294,12 @@
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
+            await window.refreshAIUsage?.();
             break;
           }
           const chunk = decoder.decode(value, { stream: true });
           markdownText += chunk;
+          if (markdownText.includes("[AI_ERROR]")) throw new Error(markdownText.split("[AI_ERROR]").pop().trim());
           const html = marked.parse(markdownText);
           summaryArea.innerHTML = DOMPurify.sanitize(html);
         }
@@ -291,12 +308,18 @@
       const reanalyzeForm = document.getElementById("reanalyze-form");
       reanalyzeForm.addEventListener("submit", async function (event) {
         event.preventDefault();
+        try {
         const formData = new FormData(reanalyzeForm);
         const response = await secureFetch(reanalyzeForm.action, {
           method: "POST",
           body: formData,
         });
         await displayStream(response);
+        } catch (error) {
+          const area = document.getElementById("upload-error");
+          area.textContent = error.message;
+          area.style.display = "block";
+        }
       });
 
       function updateExtractedText(text) {
@@ -668,6 +691,9 @@
                   });
 
                   checkQuizFinished();
+                }).catch(function (error) {
+                  feedback.textContent = error.message;
+                  answerButton.disabled = false;
                 });
             }
           });
@@ -696,6 +722,7 @@
           const answerButton = document.createElement("button");
 
           answerButton.type = "button";
+          answerButton.dataset.aiFeature = "grading";
 
           answerButton.classList.add("quiz-answer-button");
 
@@ -753,6 +780,10 @@
                 });
 
                 checkQuizFinished();
+              }).catch(function (error) {
+                feedback.textContent = error.message;
+                answerButton.dataset.usageWasDisabled = "false";
+                answerButton.disabled = Boolean(window.aiUsageReason?.("grading"));
               });
           });
 
@@ -815,6 +846,7 @@
             });
 
             buffer += chunk;
+            if (buffer.includes("[AI_ERROR]")) throw new Error(buffer.split("[AI_ERROR]").pop().trim());
 
             while (buffer.includes("\n")) {
               const newlineIndex = buffer.indexOf("\n");
@@ -870,7 +902,8 @@
 
           quizFeedback.textContent = error.message;
         } finally {
-          generateQuizButton.disabled = false;
+          generateQuizButton.disabled = Boolean(window.aiUsageReason?.("quiz"));
+          await window.refreshAIUsage?.();
 
           generateQuizButton.textContent = "復習テストを生成";
         }
@@ -881,6 +914,7 @@
 
       chatForm.addEventListener("submit", async function (event) {
         event.preventDefault();
+        try {
         const formData = new FormData(chatForm);
         const userText = formData.get("message");
         const userMessage = document.createElement("div");
@@ -910,15 +944,22 @@
           const { done, value } = await reader.read();
 
           if (done) {
+            await window.refreshAIUsage?.();
             break;
           }
 
           const chunk = decoder.decode(value, { stream: true });
 
           markdownText += chunk;
+          if (markdownText.includes("[AI_ERROR]")) throw new Error(markdownText.split("[AI_ERROR]").pop().trim());
 
           const html = marked.parse(markdownText);
           assistantMessage.innerHTML = DOMPurify.sanitize(html);
+        }
+        } catch (error) {
+          const area = document.getElementById("upload-error");
+          area.textContent = error.message;
+          area.style.display = "block";
         }
       });
     </script>

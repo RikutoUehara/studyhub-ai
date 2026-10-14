@@ -18,6 +18,9 @@ class EmailAuthTests(unittest.TestCase):
         self.context = app.app_context()
         self.context.push()
         db.create_all()
+        control = db.session.get(app.extensions['usage_ledger'].m['Control'], 1)
+        control.stopped, control.pdf_ready = False, True
+        db.session.commit()
         self.client = app.test_client()
         self.messages = []
         self.sender = patch("email_auth.httpx.post", side_effect=self.capture)
@@ -106,7 +109,8 @@ class EmailAuthTests(unittest.TestCase):
         with patch("email_auth.httpx.post", side_effect=httpx.ConnectError("offline")):
             self.assertEqual(self.register().status_code, 503)
         self.assertFalse(email_auth["verified"](User.query.first()))
-        self.assertEqual(self.post("/resend-verification", email="student@example.com").status_code, 200)
+        with patch('abuse_control.time.time', return_value=__import__('time').time() + 61):
+            self.assertEqual(self.post("/resend-verification", email="student@example.com").status_code, 200)
         self.assertEqual(len(self.messages), 1)
 
 

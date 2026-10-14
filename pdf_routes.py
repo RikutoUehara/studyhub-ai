@@ -46,15 +46,16 @@ def install_pdf_routes(app, db, Lecture):
         if key and not PdfDeletion.query.filter_by(key=key).first():
             db.session.add(PdfDeletion(key=key, not_before=0))
 
-    def cleanup(limit=100):
+    def cleanup(limit=100, detailed=False):
         # Queue rows are committed before external operations. Failure leaves a retryable job.
         try:
             ids = [row.id for row in PdfDeletion.query.filter(PdfDeletion.not_before <= time.time()).limit(limit)]
         except SQLAlchemyError:
             db.session.rollback()
             app.logger.error("PDF cleanup unavailable; retry later")
-            return 0
+            return {'completed': 0, 'failed': 1} if detailed else 0
         completed = 0
+        failed = 0
         for job_id in ids:
             try:
                 job = PdfDeletion.query.filter_by(id=job_id).with_for_update().first()
@@ -65,13 +66,15 @@ def install_pdf_routes(app, db, Lecture):
                     db.session.delete(job)
                 else:
                     storage().delete(job.key)
+                    app.extensions['abuse_control'].pdf_deleted(job.key)
                     db.session.delete(job)
                 db.session.commit()
                 completed += 1
             except (BotoCoreError, ClientError, RuntimeError, SQLAlchemyError):
                 db.session.rollback()
                 app.logger.error("PDF cleanup failed; job retained for retry")
-        return completed
+                failed += 1
+        return {'completed': completed, 'failed': failed} if detailed else completed
 
     @app.cli.command("cleanup-pdfs")
     def cleanup_command():
@@ -103,11 +106,10 @@ def install_pdf_routes(app, db, Lecture):
         course_id = lecture.course_id
         key = f"users/{user_id}/lectures/{lecture_id}/{uuid.uuid4()}.pdf"
         # Journal first: a crash during PUT or a failed DB commit cannot lose the cleanup key.
-        job = PdfDeletion(key=key, not_before=time.time() + 3600)
         try:
-            db.session.add(job)
             db.session.commit()
-            job_id = job.id
+            job_id = app.extensions['abuse_control'].pdf_reserve(
+                user_id, key, len(data), cleanup_model=PdfDeletion)
             storage().put(key, data)
             # Course deletion uses the same parent lock; take it first to avoid lock inversion.
             course = Course.query.filter_by(id=course_id).with_for_update().populate_existing().first()
@@ -119,6 +121,8 @@ def install_pdf_routes(app, db, Lecture):
                 raise RuntimeError("Upload target no longer exists")
             old_key = lecture.pdf_filename
             lecture.pdf_filename, lecture.text = key, text
+            usage = app.extensions['usage_ledger']
+            db.session.get(usage.m['PdfObject'], key).status = 'stored'
             # Old analysis belongs to the previous PDF.
             lecture.summary = None
             lecture.messages.clear()

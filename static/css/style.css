@@ -362,3 +362,18 @@ button {
 .quiz-answer-button {
   flex-shrink: 0;
 }
+
+.ai-usage-panel { max-width: 960px; box-sizing: border-box; margin: 20px auto; padding: 18px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; text-align: left; }
+.ai-usage-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ai-usage-heading h2 { margin: 0; font-size: 1.1rem; }
+.ai-usage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ai-usage-item { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: #f8fafc; border-radius: 6px; }
+.ai-usage-item small { color: #92400e; }
+.ai-usage-note { font-size: .85rem; color: #475569; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+@media (max-width: 720px) {
+  .ai-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace { display: block; height: auto; overflow: visible; }
+  .left-panel, .right-panel { box-sizing: border-box; width: 100%; height: auto; overflow: visible; }
+}
+@media (max-width: 400px) { .ai-usage-grid { grid-template-columns: 1fr; } }

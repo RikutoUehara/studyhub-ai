@@ -44,6 +44,9 @@ class PdfTests(unittest.TestCase):
         self.context = app.app_context()
         self.context.push()
         db.create_all()
+        control = db.session.get(app.extensions['usage_ledger'].m['Control'], 1)
+        control.stopped, control.pdf_ready = False, True
+        db.session.commit()
         self.store = MemoryStorage()
         app.extensions['pdf_storage'] = self.store
         self.user = User(email='owner@example.com', password_hash='unused')
@@ -53,7 +56,7 @@ class PdfTests(unittest.TestCase):
         self.course = Course(name='Course', user_id=self.user.id)
         db.session.add(self.course)
         db.session.flush()
-        self.lecture = Lecture(course_id=self.course.id, week=1)
+        self.lecture = Lecture(course_id=self.course.id, week=1, text='Study notes for testing')
         db.session.add(self.lecture)
         db.session.commit()
         self.id = self.lecture.id

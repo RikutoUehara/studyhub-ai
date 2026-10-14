@@ -7,6 +7,7 @@ import time
 from urllib.parse import urlsplit
 
 import httpx
+from email_delivery import send_email
 from flask import abort, render_template, request, session, url_for
 from werkzeug.security import generate_password_hash
 
@@ -42,6 +43,9 @@ def install_email_auth(app, db, User):
             expected = session.get("auth_csrf", "")
             if not expected or not secrets.compare_digest(expected, request.form.get("csrf_token", "")):
                 abort(400, "画面を再読み込みして、もう一度お試しください。")
+            abuse = app.extensions.get('abuse_control')
+            if abuse and request.endpoint in {'login', 'register', 'forgot_password', 'resend_verification'}:
+                abuse.auth_request(request.endpoint)
 
     @app.after_request
     def private_auth_pages(response):
@@ -75,6 +79,7 @@ def install_email_auth(app, db, User):
         parsed = urlsplit(base)
         if not key or not sender or parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise RuntimeError("Email settings are incomplete")
+        app.extensions['abuse_control'].email_send(user.id, purpose)
         token = secrets.token_urlsafe(32)
         lifetime = 86400 if purpose == "verify" else 1800
         record = EmailToken(digest=hashlib.sha256(token.encode()).hexdigest(), user_id=user.id,
@@ -86,9 +91,7 @@ def install_email_auth(app, db, User):
                    "text": f"単位トルトル君をご利用いただきありがとうございます。\n\n{action}はこちら：\n{link}\n\n有効期限は{'24時間' if purpose == 'verify' else '30分'}です。\n心当たりがない場合は、このメールを無視してください。"}
         if os.getenv("MAIL_REPLY_TO"):
             payload["reply_to"] = os.getenv("MAIL_REPLY_TO")
-        response = httpx.post("https://api.resend.com/emails", headers={"Authorization": f"Bearer {key}",
-                              "Idempotency-Key": record.digest}, json=payload, timeout=15)
-        response.raise_for_status()
+        send_email(payload, record.digest)
         db.session.add(record)
         db.session.commit()
 

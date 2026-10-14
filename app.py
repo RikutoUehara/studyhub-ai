@@ -16,6 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 import json
 import secrets
 import httpx
+import click
 from email_auth import install_email_auth
 
 import time
@@ -27,6 +28,9 @@ from flask_login import LoginManager, UserMixin, login_user, current_user, login
 from datetime import datetime
 from production_config import configure
 from quiz_randomization import randomized_question
+from usage_install import install_usage
+from ai_service import prime_stream
+from usage_ledger import LimitReached
 
 load_dotenv()
 
@@ -138,16 +142,19 @@ class QuizAttempt(db.Model):
     )
 
 client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
+    api_key=os.getenv("OPENAI_API_KEY"), timeout=120, max_retries=0
 )
 
 email_auth = install_email_auth(app, db, User)
 pdf_service = install_pdf_routes(app, db, Lecture)
 lecture_owner = install_security(app, db, Lecture)
+ai_service = install_usage(app, db, client)
 
 @app.cli.command("init-db")
 def init_db():
     """Create missing tables without changing existing records."""
+    if os.getenv('APP_ENV') == 'production':
+        raise click.ClickException('Use alembic upgrade head for production schema changes')
     db.create_all()
 
 @app.route("/register", methods=["GET", "POST"])
@@ -381,6 +388,8 @@ def upload_lecture(lecture_id):
     )
 
 def generate_summary_stream(lecture, instruction=None):
+    if not lecture.text or not lecture.text.strip():
+        raise LimitReached('先に文字を抽出できるPDFをアップロードしてください。', 400)
 
     prompt = f"""
 あなたは大学教授です。
@@ -441,7 +450,7 @@ def generate_summary_stream(lecture, instruction=None):
 
     summary_parts = []
 
-    stream = client.responses.create(
+    stream = ai_service.stream('summary',
         model="gpt-5.4-mini",
         reasoning={
             "effort": "medium"
@@ -475,7 +484,7 @@ def stream_summary(lecture_id):
 
     return Response(
         stream_with_context(
-            generate_summary_stream(lecture)
+            prime_stream(generate_summary_stream(lecture))
         ),
         mimetype="text/plain"
     )
@@ -492,10 +501,10 @@ def reanalyze_lecture(lecture_id):
 
     return Response(
         stream_with_context(
-            generate_summary_stream(
+            prime_stream(generate_summary_stream(
                 lecture,
                 instruction
-            )
+            ))
         ),
         mimetype="text/plain"
     )
@@ -504,17 +513,18 @@ def reanalyze_lecture(lecture_id):
 @lecture_owner
 def chat(lecture_id):
     lecture = Lecture.query.get(lecture_id)
+    if not lecture.text or not lecture.text.strip():
+        raise LimitReached('先に文字を抽出できるPDFをアップロードしてください。', 400)
 
-    message = request.form["message"]
+    message = request.form.get("message", "").strip()
+    if not message:
+        raise LimitReached('質問を入力してください。', 400)
 
     user_message = ChatMessage(
         lecture_id=lecture.id,
         role="user",
         content=message
     )
-
-    db.session.add(user_message)
-    db.session.commit()
 
     chat_history = ChatMessage.query.filter_by(
         lecture_id=lecture.id
@@ -555,12 +565,13 @@ def chat(lecture_id):
     ]
 
     openai_messages.extend(history_messages)
+    openai_messages.append({'role': 'user', 'content': message})
 
     def generate():
 
         reply_parts = []
 
-        stream = client.responses.create(
+        stream = ai_service.stream('chat',
             model="gpt-5.4-nano",
             reasoning={
                 "effort": "low"
@@ -568,6 +579,9 @@ def chat(lecture_id):
             input=openai_messages,
             stream=True
         )
+        # Store only accepted questions: quota/input rejection leaves no chat entry.
+        db.session.add(user_message)
+        db.session.commit()
 
         for event in stream:
 
@@ -589,7 +603,7 @@ def chat(lecture_id):
         db.session.commit()
 
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(prime_stream(generate())),
         mimetype="text/plain"
     )
 
@@ -602,12 +616,14 @@ def uploaded_file(filename):
 def generate_quiz(lecture_id):
 
     lecture = Lecture.query.get(lecture_id)
+    if not lecture.text or not lecture.text.strip():
+        raise LimitReached('先に文字を抽出できるPDFをアップロードしてください。', 400)
 
     def generate():
 
         buffer = ""
 
-        stream = client.responses.create(
+        stream = ai_service.stream('quiz',
             model="gpt-5.4-nano",
             reasoning={
                 "effort": "medium"
@@ -670,7 +686,7 @@ Markdownや前置きは不要です。
             yield randomized_question(buffer) + "\n"
 
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(prime_stream(generate())),
         mimetype="application/x-ndjson"
     )
 
@@ -680,9 +696,11 @@ def check_keyword(lecture_id):
 
     user_answer = request.form.get("user_answer")
     correct_answer = request.form.get("correct_answer")
+    if not isinstance(user_answer, str) or not user_answer.strip() or not correct_answer:
+        raise LimitReached('回答と模範解答を入力してください。', 400)
 
 
-    response = client.chat.completions.create(
+    response = ai_service.completion('grading',
         model="gpt-5.4-nano",
         messages=[
             {
@@ -720,11 +738,16 @@ def check_written(lecture_id):
     user_answer = request.form.get("user_answer")
     model_answer = request.form.get("model_answer")
     rubric = request.form.get("rubric")
-    rubric = json.loads(rubric)
+    try:
+        rubric = json.loads(rubric or '')
+    except (TypeError, ValueError):
+        raise LimitReached('採点基準の形式が不正です。', 400) from None
+    if not user_answer or not user_answer.strip() or not model_answer or not isinstance(rubric, list):
+        raise LimitReached('回答・模範解答・採点基準を確認してください。', 400)
     # 文字列から配列に
 
 
-    response = client.chat.completions.create(
+    response = ai_service.completion('grading',
         model="gpt-5.4-nano",
         response_format={"type": "json_object"}, 
         messages=[
@@ -808,7 +831,8 @@ def save_quiz_result(lecture_id):
     })
 
 if __name__ == "__main__":
-
+    if os.getenv('APP_ENV') == 'production':
+        raise RuntimeError('Use Gunicorn for production and Alembic for schema changes')
     with app.app_context():
         db.create_all()
     app.run(debug=os.getenv("FLASK_DEBUG") == "1")

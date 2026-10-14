@@ -32,9 +32,12 @@ class SecurityTests(unittest.TestCase):
         return client.post(f'/lecture/{lecture_id or self.id}' + suffix, buffered=True, **options)
 
     def test_anonymous_other_owner_missing_and_csrf(self):
-        with patch('app.client.responses.create', return_value=[]) as responses, patch(
+        usage = SimpleNamespace(input_tokens=5, output_tokens=5)
+        events = [SimpleNamespace(type='response.completed', response=SimpleNamespace(usage=usage))]
+        with patch('app.client.responses.create', side_effect=lambda **kw: iter(events)) as responses, patch(
             'app.client.chat.completions.create', return_value=SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content='{"is_correct":true}'))]
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"is_correct":true}'))],
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=5)
             )
         ) as completions:
             other = self.client_for(self.other.id)

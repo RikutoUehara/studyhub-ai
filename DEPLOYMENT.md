@@ -1,16 +1,16 @@
 # v0.1.0の本番起動
 
-RenderなどのLinux環境でGunicornを使います。サイトの公開はまだ行っていません。
+RenderなどのLinux環境でGunicornを使います。既存版はRenderへデプロイ済みですが、利用制限版の本番反映は未実施です。
 
 ## デプロイ先の設定
 
 - Build command: `pip install -r requirements.txt`
-- 初回・追加テーブル導入時: `python -m flask --app app init-db`
+- 利用制限導入後のDB移行: `python -m alembic upgrade head`（詳細は `USAGE_CONTROLS.md`）
 - Start command: `gunicorn --config gunicorn.conf.py app:app`
 - Health check path: `/healthz`（プロセスの応答確認。DB・R2の疎通確認ではありません）
 
 初期化コマンドはデプロイ先のシェルまたはpre-deploy処理から実行します。
-現在のDBには追加テーブルも作成済みです。
+2026-10-14に本番DB移行とPDF容量初期化は完了しました（`PRODUCTION_MIGRATION_RESULT.md`）。AIは停止中です。通常の起動・ビルドでDB初期化や移行を繰り返さないでください。
 
 `.env.example` の値をサービスの環境変数へ登録してください。
 本番では `APP_ENV=production`、`FLASK_DEBUG=0`、
@@ -24,12 +24,12 @@ Windowsのローカル開発では `APP_ENV=development` のまま
 デバッグが必要なときだけ `FLASK_DEBUG=1` を設定します。
 GunicornはWindowsにはインストールしません。
 
-## PDFの削除再試行
+## 統合定期処理
 
-同じ環境変数を設定した定期ジョブから、5分ごとを目安に以下を実行します。
+DB移行・PDF容量初期化の完了後、同じ環境変数を設定したRender Cron Jobを1つ作成し、10分ごとを目安に以下を実行します。詳細は `RENDER_CRON.md` を参照してください。旧PDF削除ジョブと重複稼働させないでください。
 
 ```sh
-python -m flask --app app cleanup-pdfs
+python -m flask --app app usage-maintenance
 ```
 
 ## 本番の動作確認
@@ -44,5 +44,5 @@ AIのストリーミングやPDF転送はスレッドを占有します。
 ホスティング側のログ収集も確認してください。
 ストリーム開始後のAPI障害は、通常の500エラー応答へ切り替えられません。
 
-公開前の残課題は、ログイン・メール・AI処理の回数制限と利用上限、
-利用規約・プライバシー説明、成績を正式に扱う場合のサーバー側採点です。
+利用制限の設定と定期処理は `USAGE_CONTROLS.md` を参照してください。
+公開前の残課題は利用規約・プライバシー説明と、本番での制限検証です。

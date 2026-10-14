@@ -1,0 +1,15 @@
+<section class="ai-usage-panel" data-ai-usage-url="{{ url_for('ai_usage') }}" aria-label="今日のAI利用状況">
+  <div class="ai-usage-heading"><h2>今日のAI利用状況</h2><button type="button" data-usage-refresh>更新</button></div>
+  <p data-usage-message role="status" aria-live="polite">利用状況を確認しています。</p>
+  <div class="ai-usage-grid">
+    {% for feature, label in [('summary', '要約・再分析'), ('chat', 'AIチャット'), ('quiz', '復習テスト生成'), ('grading', 'AI採点')] %}
+    <div class="ai-usage-item" data-usage-feature="{{ feature }}">
+      <strong>{{ label }}</strong><span data-usage-count>—</span><span data-usage-remaining>—</span>
+      <small data-usage-reason></small>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="ai-usage-note">毎日午前0時（日本時間）に切り替わります。実行中の予約も使用回数に含みます。</p>
+  <p class="ai-usage-note" data-usage-reset></p>
+</section>
+<script src="{{ url_for('static', filename='js/ai-usage.js') }}" defer></script>
