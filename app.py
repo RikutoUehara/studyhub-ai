@@ -217,7 +217,6 @@ def logout():
     return redirect(url_for("login"))
 
 @app.route("/")
-@login_required
 def home():
     return render_template("index.html")
 

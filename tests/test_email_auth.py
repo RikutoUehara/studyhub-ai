@@ -97,12 +97,12 @@ class EmailAuthTests(unittest.TestCase):
         with other.session_transaction() as state:
             state["_user_id"] = str(user.id)
             state["auth_version"] = 0
-        self.assertEqual(other.get("/").status_code, 200)
+        self.assertEqual(other.get("/course").status_code, 200)
         self.post("/forgot-password", email=user.email)
         self.post(self.link(), password="new-password", password_confirm="new-password")
         from flask import g
         g.pop("_login_user", None)
-        self.assertEqual(other.get("/").status_code, 302)
+        self.assertEqual(other.get("/course").status_code, 302)
 
     def test_delivery_failure_can_be_retried(self):
         import httpx
