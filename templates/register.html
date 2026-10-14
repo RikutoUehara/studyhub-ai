@@ -21,10 +21,12 @@
       </div>
 
       <p>パスワードは8〜128文字。登録後にメール認証が必要です。</p>
+      <p>登録前に<a href="{{ url_for('terms') }}">利用規約</a>と<a href="{{ url_for('privacy') }}">プライバシーポリシー</a>をご確認ください。登録することで利用規約に同意したものとします。</p>
       <button type="submit">登録</button>
     </form>
     <p><a href="{{ url_for('forgot_password') }}">パスワードを忘れた方</a></p>
     <p><a href="{{ url_for('resend_verification') }}">認証メールを再送する</a></p>
     <p><a href="{{ url_for('login') }}">ログイン</a></p>
+    {% include '_public_links.html' %}
   </body>
 </html>

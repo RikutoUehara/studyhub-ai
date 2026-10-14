@@ -157,6 +157,16 @@ def init_db():
         raise click.ClickException('Use alembic upgrade head for production schema changes')
     db.create_all()
 
+@app.get("/terms")
+def terms():
+    return render_template("terms.html")
+
+
+@app.get("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":

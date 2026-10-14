@@ -377,3 +377,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .left-panel, .right-panel { box-sizing: border-box; width: 100%; height: auto; overflow: visible; }
 }
 @media (max-width: 400px) { .ai-usage-grid { grid-template-columns: 1fr; } }
+
+.policy-page { max-width: 800px; margin: 32px auto; padding: 24px; background: #fff; line-height: 1.8; border-radius: 12px; }
+.policy-page p { overflow-wrap: anywhere; }
+.public-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 24px 0; font-size: 14px; }
+@media (max-width: 600px) { .policy-page { margin: 12px; padding: 16px; } }
