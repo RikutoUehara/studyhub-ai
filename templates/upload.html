@@ -1,190 +1,125 @@
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PDFアップロード</title>
+{% extends 'base.html' %}
+{% block title %}第{{ lecture.week }}回の学習 | 単位トルトル君{% endblock %}
+{% block body_class %}learning-page{% endblock %}
 
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/style.css') }}"
-    />
-  </head>
-
-  <body>
-    <div class="upload">
-      <h2>{{ lecture.week }}回の授業資料アップロード</h2>
-      <p>PDFは1日20回・保存合計100 MiBまでです。AIチャットは資料の一部と直近の会話を参照します。</p>
-
-      <form
-        id="upload-form"
-        action="{{ url_for('upload_lecture', lecture_id=lecture.id) }}"
-        method="POST"
-        enctype="multipart/form-data"
-      >
-        <input type="hidden" name="csrf_token" value="{{ pdf_csrf_token() }}" />
-        <input type="file" name="pdf" accept=".pdf" required />
-        <p>PDFは最大{{ config['PDF_MAX_BYTES'] // 1048576 }} MiB・{{ config['PDF_MAX_PAGES'] }}ページです。暗号化PDFはアップロードできません。</p>
-
-        {% if error %}
-        <p>{{ error }}</p>
-        {% endif %}
-        <br /><br />
-        {% if lecture.pdf_filename %}
-        <button type="submit">PDFを差し替える</button>
-        {% else %}
-        <button type="submit">アップロード</button>
-        {% endif %}
-      </form>
-
-      <div id="loading" style="display: none">
-        <h2>AIが解析中です...</h2>
-        <p>しばらくお待ちください</p>
-      </div>
-
-      <div id="upload-error" style="display: none"></div>
-    </div>
-
-    <hr />
-    {% include '_ai_usage.html' %}
-
-    <div class="pdf-text">
-      <details>
-        <summary>抽出した文字を見る</summary>
-        <pre id="extracted-text">
-            {% if lecture.text %}
-                {{ lecture.text }}
-            {% else %}
-                まだ文字が抽出されていません
-            {% endif %}
-        </pre>
-      </details>
-    </div>
-
-    <h2>AIへの追加指示</h2>
-
-    <form
-      id="reanalyze-form"
-      action="{{ url_for('reanalyze_lecture', lecture_id=lecture.id) }}"
-      method="POST"
-    >
-      <textarea
-        name="instruction"
-        rows="4"
-        placeholder="例：試験対策中心に詳しく説明してください"
-      ></textarea>
-
-      <br /><br />
-
-      <button type="submit" data-ai-feature="summary">この指示で再分析</button>
-    </form>
-
-    <div class="workspace">
-      <div class="left-panel">
-        <div class="viewer-tabs">
-          <button
-            id="analysis-tab"
-            type="button"
-            class="tab-button active"
-            onclick="showTab('analysis')"
-          >
-            AI分析
-          </button>
-
-          <button
-            id="pdf-tab"
-            type="button"
-            class="tab-button"
-            onclick="showTab('pdf')"
-          >
-            PDF
-          </button>
-
-          <button
-            id="quiz-tab"
-            type="button"
-            class="tab-button"
-            onclick="showTab('quiz')"
-          >
-            復習テスト
-          </button>
-        </div>
-        <div id="analysis-content" class="tab-content">
-          <div id="summary-stream" class="summary">
-            {% if lecture.summary %}
-            <div class="summary">{{ summary_html|safe }}</div>
-            {% else %}
-            <p>まだ分析されていません。</p>
-            {% endif %}
-          </div>
-        </div>
-        <div id="pdf-content" class="tab-content" style="display: none">
-          {% if lecture.pdf_filename %}
-          <p><a href="{{ url_for('lecture_pdf', lecture_id=lecture.id, download=1) }}">PDFをダウンロード</a></p>
-
-          <iframe
-            src="{{ url_for('lecture_pdf', lecture_id=lecture.id) }}"
-            width="100%"
-            height="900px"
-          >
-          </iframe>
-
-          {% else %}
-
-          <p>PDFがまだアップロードされていません。</p>
-
-          {% endif %}
-        </div>
-        <div id="quiz-content" class="tab-content" style="display: none">
-          <h2>復習テスト</h2>
-
-          <button type="button" id="generate-quiz-button" data-ai-feature="quiz">
-            復習テストを生成
-          </button>
-
-          <div id="quiz-question"></div>
-          <div id="quiz-result"></div>
-
-          <div class="quiz-history">
-  <h3>得点推移</h3>
-  <canvas id="quiz-score-chart"></canvas>
+{% block content %}
+<nav class="breadcrumb" aria-label="現在の位置">
+  <a href="{{ url_for('course') }}">授業管理</a><span aria-hidden="true">/</span>
+  <a href="{{ url_for('lecture', course_id=lecture.course_id) }}">{{ lecture.course.name }}</a><span aria-hidden="true">/</span>
+  <span aria-current="page">第{{ lecture.week }}回</span>
+</nav>
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">LEARNING WORKSPACE</p>
+    <h1 class="page-title">第{{ lecture.week }}回の学習</h1>
+    <p class="page-description">資料を読み解き、質問して、復習する。ここから理解を深めましょう。</p>
+  </div>
+  <span id="pdf-status" class="badge{% if not lecture.pdf_filename %} badge-neutral{% endif %}">{% if lecture.pdf_filename %}資料登録済み{% else %}資料未登録{% endif %}</span>
 </div>
 
-<div id="quiz-feedback"></div>
+<div id="loading" class="loading-status" role="status" aria-live="polite" style="display: none">資料を処理しています。完了までしばらくお待ちください。</div>
+<div id="upload-error" class="alert" role="alert" style="display: none"></div>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
 
-        </div>
+<div class="learning-tools">
+  <section class="panel upload-panel" aria-labelledby="upload-heading">
+    <h2 id="upload-heading">授業資料</h2>
+    <form id="upload-form" action="{{ url_for('upload_lecture', lecture_id=lecture.id) }}" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ pdf_csrf_token() }}">
+      <div class="upload-dropzone">
+        <label for="lecture-pdf">学習するPDFを選択</label>
+        <input id="lecture-pdf" type="file" name="pdf" accept=".pdf" aria-describedby="pdf-hint" required>
       </div>
+      <div class="upload-actions">
+        <button type="submit">{% if lecture.pdf_filename %}PDFを差し替える{% else %}アップロード{% endif %}</button>
+        <p class="field-hint" id="pdf-hint">最大{{ config['PDF_MAX_BYTES'] // 1048576 }} MiB・{{ config['PDF_MAX_PAGES'] }}ページ<br>1日20回／保存合計100 MiB。暗号化PDFは非対応です。</p>
+      </div>
+    </form>
+  </section>
+  <section class="panel instruction-panel" aria-labelledby="instruction-heading">
+    <h2 id="instruction-heading">AI分析をカスタマイズ</h2>
+    <form id="reanalyze-form" action="{{ url_for('reanalyze_lecture', lecture_id=lecture.id) }}" method="POST">
+      <label for="analysis-instruction" class="visually-hidden">AIへの追加指示</label>
+      <textarea id="analysis-instruction" name="instruction" rows="2" placeholder="例：試験に出そうなポイントを詳しく説明して" aria-describedby="instruction-hint"></textarea>
+      <div class="upload-actions">
+        <button type="submit" class="button-secondary" data-ai-feature="summary">この指示で再分析</button>
+        <p class="field-hint" id="instruction-hint">授業資料の内容に沿って分析します。</p>
+      </div>
+    </form>
+  </section>
+</div>
 
-      <div class="right-panel">
-        <h2>AIチャット</h2>
+<div class="pdf-text">
+  <details>
+    <summary>PDFから抽出したテキストを確認</summary>
+    <pre id="extracted-text">{% if lecture.text %}{{ lecture.text }}{% else %}まだ文字が抽出されていません。{% endif %}</pre>
+  </details>
+</div>
 
-        <div class="chat-box">
-          {% for message in messages %}
-
-          <div class="message {{ message.role }}">
-            {{ message.content_html|safe }}
-          </div>
-          {% endfor %}
-        </div>
-        <form
-          class="chat-form"
-          action="{{ url_for('chat', lecture_id=lecture.id) }}"
-          method="POST"
-        >
-          <textarea name="message" placeholder="AIに質問する"> </textarea>
-          <button type="submit" data-ai-feature="chat">送信</button>
-        </form>
+<div class="workspace">
+  <section class="left-panel" aria-label="資料と復習">
+    <div class="viewer-tabs" role="tablist" aria-label="学習内容">
+      <button id="analysis-tab" type="button" class="tab-button active" role="tab" aria-selected="true" aria-controls="analysis-content" onclick="showTab('analysis')">AI分析</button>
+      <button id="pdf-tab" type="button" class="tab-button" role="tab" aria-selected="false" aria-controls="pdf-content" tabindex="-1" onclick="showTab('pdf')">PDF資料</button>
+      <button id="quiz-tab" type="button" class="tab-button" role="tab" aria-selected="false" aria-controls="quiz-content" tabindex="-1" onclick="showTab('quiz')">復習テスト</button>
+    </div>
+    <div id="analysis-content" class="tab-content" role="tabpanel" aria-labelledby="analysis-tab" tabindex="0">
+      <div id="summary-stream" class="summary" aria-live="off">
+        {% if lecture.summary %}{{ summary_html|safe }}{% else %}
+        <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">▤</span><h2>資料のポイントを、ここに。</h2><p>PDFをアップロードすると、要約や重要語句を確認できます。<br>登録済みの資料は「この指示で再分析」から分析できます。</p></div>
+        {% endif %}
       </div>
     </div>
+    <div id="pdf-content" class="tab-content" role="tabpanel" aria-labelledby="pdf-tab" tabindex="0" hidden>
+      {% if lecture.pdf_filename %}
+      <div class="pdf-toolbar"><a class="button button-secondary button-small" href="{{ url_for('lecture_pdf', lecture_id=lecture.id, download=1) }}">PDFをダウンロード</a></div>
+      <iframe class="pdf-viewer" src="{{ url_for('lecture_pdf', lecture_id=lecture.id) }}" title="第{{ lecture.week }}回の授業資料PDF"></iframe>
+      {% else %}<div class="empty-state"><h2>資料はまだありません</h2><p>この画面の「授業資料」からPDFをアップロードしてください。</p></div>{% endif %}
+    </div>
+    <div id="quiz-content" class="tab-content" role="tabpanel" aria-labelledby="quiz-tab" tabindex="0" hidden>
+      <div class="quiz-intro">
+        <p class="eyebrow">CHECK YOUR UNDERSTANDING</p>
+        <h2>復習テスト</h2>
+        <p>授業資料から10問を出題します。回答後は解説を確認して、理解を確かめましょう。</p>
+        <button type="button" id="generate-quiz-button" data-ai-feature="quiz">復習テストを生成</button>
+      </div>
+      <div id="quiz-question"></div>
+      <div id="quiz-result" role="status" aria-live="polite"></div>
+      <div id="quiz-feedback" role="alert"></div>
+      <section class="quiz-history" aria-labelledby="score-heading">
+        <h3 id="score-heading">得点の推移</h3>
+        <p>これまでの復習を振り返りましょう。</p>
+        <div class="chart-container"><canvas id="quiz-score-chart" role="img" aria-label="復習テストの得点率の推移。各回の得点は下の一覧でも確認できます。"></canvas></div>
+        <p id="score-history-empty" class="field-hint"{% if quiz_score_data %} hidden{% endif %}>テストを完了すると、ここに得点が記録されます。</p>
+        <ul id="score-history-list" class="score-history-list" aria-label="復習テストの得点一覧">
+          {% for item in quiz_score_data %}<li>{{ item.label }} <strong>{{ item.score }}%</strong></li>{% endfor %}
+        </ul>
+      </section>
+    </div>
+  </section>
 
-    </script>
-  </body>
-</html>
+  <section class="right-panel" aria-labelledby="chat-heading">
+    <div class="chat-heading"><h2 id="chat-heading">AIチャット</h2><p>資料の一部と直近の会話を参考に回答します。</p></div>
+    <div class="chat-box" role="log" aria-label="AIとの会話" aria-live="polite" aria-relevant="additions">
+      {% for message in messages %}<div class="message {{ message.role }}">{{ message.content_html|safe }}</div>{% else %}
+      <div class="chat-empty"><span class="empty-state-icon" aria-hidden="true">?</span><p>気になることから、聞いてみよう。</p><p>例：「この授業の大切なポイントは？」</p></div>
+      {% endfor %}
+    </div>
+    <form class="chat-form" action="{{ url_for('chat', lecture_id=lecture.id) }}" method="POST">
+      <div class="form-field"><label for="chat-message" class="visually-hidden">資料についてAIに質問</label><textarea id="chat-message" name="message" rows="2" placeholder="資料について質問する"></textarea></div>
+      <button type="submit" data-ai-feature="chat">送信</button>
+    </form>
+  </section>
+</div>
+{% include '_ai_usage.html' %}
+{% endblock %}
+
+{% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
 
-    <script>
       const quizScoreData = {{ quiz_score_data | tojson }};
       const quizScoreChart = new Chart(
   document.getElementById("quiz-score-chart"),
@@ -198,17 +133,37 @@
         {
           label: "正答率",
           data: quizScoreData.map(item => item.score),
+          borderColor: "#245ddd",
+          backgroundColor: "rgba(36, 93, 221, 0.06)",
+          pointBackgroundColor: "#ffffff",
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          borderWidth: 2,
+          fill: true,
           tension: 0.2
         }
       ]
     },
 
     options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? false : { duration: 200 },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: context => "正答率 " + context.parsed.y + "%" } }
+      },
       scales: {
+        x: { grid: { display: false }, ticks: { color: "#5b6b80", font: { size: 11 } } },
         y: {
           min: 0,
           max: 100,
+          grid: { color: "#e5ebf3" },
           ticks: {
+            color: "#5b6b80",
+            stepSize: 25,
+            font: { size: 11 },
             callback: function(value) {
               return value + "%";
             }
@@ -223,7 +178,7 @@
       const uploadButton = uploadForm.querySelector("button[type='submit']");
       uploadForm.addEventListener("submit", async function (event) {
         event.preventDefault();
-        uploadForm.disabled = true;
+        uploadButton.disabled = true;
         const loading = document.getElementById("loading");
         const errorArea = document.getElementById("upload-error");
         loading.style.display = "block";
@@ -240,6 +195,9 @@
             throw new Error(data.error || "アップロードに失敗しました");
           }
           if (data.success) {
+            document.getElementById("pdf-status").textContent = "資料登録済み";
+            document.getElementById("pdf-status").classList.remove("badge-neutral");
+            uploadButton.textContent = "PDFを差し替える";
             markListsUpdated();
             updatePdfViewer(data.pdf_url);
             updateExtractedText(data.text);
@@ -332,47 +290,43 @@
         pdfContent.innerHTML = "";
         const download = document.createElement("a");
         download.href = pdfUrl + "?download=1";
+        download.className = "button button-secondary button-small";
         download.textContent = "PDFをダウンロード";
         const downloadArea = document.createElement("p");
         downloadArea.appendChild(download);
         pdfContent.appendChild(downloadArea);
         const iframe = document.createElement("iframe");
         iframe.src = pdfUrl + "?t=" + Date.now();
-        iframe.width = "100%";
-        iframe.height = "900px";
+        iframe.className = "pdf-viewer";
+        iframe.title = "授業資料PDF";
         pdfContent.appendChild(iframe);
       }
 
       function showTab(tab) {
-        const analysis = document.getElementById("analysis-content");
-        const pdf = document.getElementById("pdf-content");
-        const quiz = document.getElementById("quiz-content");
-        const analysisTab = document.getElementById("analysis-tab");
-        const pdfTab = document.getElementById("pdf-tab");
-        const quizTab = document.getElementById("quiz-tab");
-        if (tab === "analysis") {
-          analysis.style.display = "block";
-          pdf.style.display = "none";
-          quiz.style.display = "none";
-          analysisTab.classList.add("active");
-          pdfTab.classList.remove("active");
-          quizTab.classList.remove("active");
-        } else if (tab === "pdf") {
-          analysis.style.display = "none";
-          pdf.style.display = "block";
-          quiz.style.display = "none";
-          analysisTab.classList.remove("active");
-          pdfTab.classList.add("active");
-          quizTab.classList.remove("active");
-        } else if (tab === "quiz") {
-          analysis.style.display = "none";
-          pdf.style.display = "none";
-          quiz.style.display = "block";
-          analysisTab.classList.remove("active");
-          pdfTab.classList.remove("active");
-          quizTab.classList.add("active");
-        }
+        ["analysis", "pdf", "quiz"].forEach(name => {
+          const selected = name === tab;
+          const panel = document.getElementById(name + "-content");
+          const button = document.getElementById(name + "-tab");
+          panel.hidden = !selected;
+          button.classList.toggle("active", selected);
+          button.setAttribute("aria-selected", String(selected));
+          button.tabIndex = selected ? 0 : -1;
+        });
+        if (tab === "quiz") quizScoreChart.resize();
       }
+
+      const tabButtons = [...document.querySelectorAll('[role="tab"]')];
+      tabButtons.forEach((button, index) => button.addEventListener("keydown", event => {
+        let target;
+        if (event.key === "ArrowRight") target = (index + 1) % tabButtons.length;
+        if (event.key === "ArrowLeft") target = (index + tabButtons.length - 1) % tabButtons.length;
+        if (event.key === "Home") target = 0;
+        if (event.key === "End") target = tabButtons.length - 1;
+        if (target === undefined) return;
+        event.preventDefault();
+        tabButtons[target].focus();
+        showTab(tabButtons[target].id.replace("-tab", ""));
+      }));
 
       async function streamSummary() {
         const response = await secureFetch(
@@ -451,7 +405,7 @@
       "%</p>";
 
     quizResult.scrollIntoView({
-      behavior: "smooth",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
       block: "center",
     });
 
@@ -464,6 +418,13 @@
         quizScoreChart.data.labels.push(result.label);
         quizScoreChart.data.datasets[0].data.push(result.score);
         quizScoreChart.update();
+        document.getElementById("score-history-empty").hidden = true;
+        const historyItem = document.createElement("li");
+        historyItem.textContent = result.label + " ";
+        const historyScore = document.createElement("strong");
+        historyScore.textContent = result.score + "%";
+        historyItem.appendChild(historyScore);
+        document.getElementById("score-history-list").appendChild(historyItem);
       } catch (error) {
         console.error(error);
         quizResultSaved = false;
@@ -482,12 +443,14 @@
 
         questionText.textContent =
           "問題" + (index + 1) + "：" + question.question;
+        questionText.id = "quiz-question-" + index;
 
         questionBox.appendChild(questionText);
 
         const feedback = document.createElement("div");
 
         feedback.classList.add("quiz-feedback");
+        feedback.setAttribute("role", "status");
 
         questionBox.appendChild(feedback);
 
@@ -500,6 +463,7 @@
             const choiceButton = document.createElement("button");
 
             choiceButton.classList.add("quiz-choice");
+            choiceButton.type = "button";
 
             choiceButton.textContent = choice;
 
@@ -514,6 +478,7 @@
                 }
 
                 button.disabled = true;
+                button.setAttribute("aria-pressed", String(button === choiceButton));
               });
 
               answeredCount++;
@@ -530,7 +495,7 @@
                 DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
               feedback.scrollIntoView({
-                behavior: "smooth",
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
                 block: "center",
               });
 
@@ -548,12 +513,14 @@
           const trueButton = document.createElement("button");
 
           trueButton.classList.add("quiz-choice");
+          trueButton.type = "button";
 
           trueButton.textContent = "○ 正しい";
 
           const falseButton = document.createElement("button");
 
           falseButton.classList.add("quiz-choice");
+          falseButton.type = "button";
 
           falseButton.textContent = "× 誤り";
 
@@ -568,6 +535,7 @@
               }
 
               button.disabled = true;
+              button.setAttribute("aria-pressed", String(button === selectedButton));
             });
 
             answeredCount++;
@@ -584,7 +552,7 @@
               DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
             feedback.scrollIntoView({
-              behavior: "smooth",
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
               block: "center",
             });
 
@@ -617,6 +585,7 @@
           answerInput.classList.add("quiz-answer-input");
 
           answerInput.placeholder = "回答を入力してください";
+          answerInput.setAttribute("aria-labelledby", questionText.id);
 
           const answerButton = document.createElement("button");
 
@@ -645,7 +614,7 @@
                 DOMPurify.sanitize("<p><strong>解説：</strong>" + question.explanation + "</p>");
 
               feedback.scrollIntoView({
-                behavior: "smooth",
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
                 block: "center",
               });
 
@@ -686,7 +655,7 @@
                     "</p>");
 
                   feedback.scrollIntoView({
-                    behavior: "smooth",
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
                     block: "center",
                   });
 
@@ -718,6 +687,7 @@
           answerInput.classList.add("quiz-answer-input");
 
           answerInput.placeholder = "記述式の回答を入力してください";
+          answerInput.setAttribute("aria-labelledby", questionText.id);
 
           const answerButton = document.createElement("button");
 
@@ -775,7 +745,7 @@
                   "</p>");
 
                 feedback.scrollIntoView({
-                  behavior: "smooth",
+                  behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
                   block: "center",
                 });
 
@@ -917,6 +887,7 @@
         try {
         const formData = new FormData(chatForm);
         const userText = formData.get("message");
+        chatBox.querySelector(".chat-empty")?.remove();
         const userMessage = document.createElement("div");
         userMessage.classList.add("message", "user");
         userMessage.textContent = userText;
@@ -963,3 +934,5 @@
         }
       });
     </script>
+
+{% endblock %}

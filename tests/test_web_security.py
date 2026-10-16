@@ -1,4 +1,5 @@
 import unittest
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -34,11 +35,20 @@ class SecurityTests(unittest.TestCase):
     def test_anonymous_other_owner_missing_and_csrf(self):
         usage = SimpleNamespace(input_tokens=5, output_tokens=5)
         events = [SimpleNamespace(type='response.completed', response=SimpleNamespace(usage=usage))]
-        with patch('app.client.responses.create', side_effect=lambda **kw: iter(events)) as responses, patch(
-            'app.client.chat.completions.create', return_value=SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content='{"is_correct":true}'))],
+        quiz = '\n'.join(json.dumps({'type': 'keyword', 'question': 'q', 'answer': 'a',
+                                    'explanation': 'e'}) for _ in range(10))
+        def stream_events(**kwargs):
+            if '1行につき1問' in str(kwargs.get('input')):
+                return iter([SimpleNamespace(type='response.output_text.delta', delta=quiz), *events])
+            return iter(events)
+        def completion(**kwargs):
+            content = '{"is_correct":true,"score":1,"total":1,"feedback":"ok"}' if kwargs.get('response_format') else 'true'
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
                 usage=SimpleNamespace(prompt_tokens=5, completion_tokens=5)
             )
+        with patch('app.client.responses.create', side_effect=stream_events) as responses, patch(
+            'app.client.chat.completions.create', side_effect=completion
         ) as completions:
             other = self.client_for(self.other.id)
             for suffix, data in self.routes:

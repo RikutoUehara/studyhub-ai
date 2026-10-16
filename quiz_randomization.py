@@ -5,6 +5,11 @@ import secrets
 
 def randomized_question(line):
     question = json.loads(line)
+    if not isinstance(question, dict):
+        raise ValueError("Expected a question object")
+    if (not isinstance(question.get("question"), str) or not question["question"].strip()
+            or not isinstance(question.get("explanation"), str)):
+        raise ValueError("Invalid question text or explanation")
     if question.get("type") == "multiple_choice":
         choices = question.get("choices")
         if (not isinstance(choices, list) or len(choices) != 4

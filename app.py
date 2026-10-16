@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, abort, session
+from contextlib import closing
 
 from pdf_routes import install_pdf_routes
 
@@ -14,6 +15,7 @@ from flask_sqlalchemy import SQLAlchemy
 
 
 import json
+import math
 import secrets
 import httpx
 import click
@@ -397,6 +399,7 @@ def upload_lecture(lecture_id):
     )
 
 def generate_summary_stream(lecture, instruction=None):
+    lecture_id = lecture.id
     if not lecture.text or not lecture.text.strip():
         raise LimitReached('先に文字を抽出できるPDFをアップロードしてください。', 400)
 
@@ -479,7 +482,7 @@ def generate_summary_stream(lecture, instruction=None):
     summary = "".join(summary_parts)
 
     # ストリーミング開始前のオブジェクトはセッションから外れるため、再取得する。
-    lecture = db.session.get(Lecture, lecture.id)
+    lecture = db.session.get(Lecture, lecture_id)
     if lecture is None:
         return
     lecture.summary = summary
@@ -603,7 +606,7 @@ def chat(lecture_id):
         reply = "".join(reply_parts)
 
         assistant_message = ChatMessage(
-            lecture_id=lecture.id,
+            lecture_id=lecture_id,
             role="assistant",
             content=reply
         )
@@ -630,8 +633,6 @@ def generate_quiz(lecture_id):
 
     def generate():
 
-        buffer = ""
-
         stream = ai_service.stream('quiz',
             model="gpt-5.4-nano",
             reasoning={
@@ -648,7 +649,7 @@ Markdownや前置きは不要です。
 
 例：
 
-{{"type":"multiple_choice","question":"問題文","choices":["選択肢1","選択肢2","選択肢3","選択肢4"],"answer":"正解","explanation":"解説"}}
+{{"type":"multiple_choice","question":"問題文","choices":["選択肢1","選択肢2","選択肢3","選択肢4"],"answer":"選択肢1","explanation":"解説"}}
 
 {{"type":"true_false","question":"問題文","answer":true,"explanation":"解説"}}
 
@@ -657,6 +658,7 @@ Markdownや前置きは不要です。
 問題作成ルール：
 ・問題形式は multiple_choice、true_false、keyword の3種類のみを使用してください。
 ・multiple_choice は4択問題にしてください。
+・multiple_choice の answer は、choices 内の正解の文字列と完全に一致させてください。
 ・true_false は正誤問題にしてください。
 ・問題数は4択4問、正誤4問、キーワード2問にしてください。出題順は混ぜてください。
 ・正誤4問は正解trueを2問、falseを2問にしてください。falseの問題文は資料に基づく明確な誤りを含め、解説で正しい内容を説明してください。
@@ -674,25 +676,25 @@ Markdownや前置きは不要です。
             stream=True
         )
 
-        for event in stream:
+        # Finish accounting and close the source before parsing untrusted output.
+        # Never leave generator cleanup to GC during a later DB transaction.
+        parts = []
+        with closing(stream):
+            for event in stream:
+                if event.type == "response.output_text.delta":
+                    parts.append(event.delta)
 
-            if event.type == "response.output_text.delta":
+        try:
+            lines = [line.strip() for line in "".join(parts).splitlines() if line.strip()]
+            if len(lines) != 10:
+                raise ValueError("Expected ten questions")
+            questions = [randomized_question(line) for line in lines]
+        except (ValueError, TypeError, RecursionError):
+            raise LimitReached('復習テストを正しい形式で生成できませんでした。もう一度「復習テストを生成」を押してください。', 502) from None
 
-                buffer += event.delta
-
-                while "\n" in buffer:
-
-                    line, buffer = buffer.split("\n", 1)
-
-                    line = line.strip()
-
-                    if line:
-                        yield randomized_question(line) + "\n"
-
-        buffer = buffer.strip()
-
-        if buffer:
-            yield randomized_question(buffer) + "\n"
+        # Keep the existing NDJSON contract; incomplete quizzes are never shown.
+        for question in questions:
+            yield question + "\n"
 
     return Response(
         stream_with_context(prime_stream(generate())),
@@ -733,11 +735,16 @@ def check_keyword(lecture_id):
         ]
     )
 
-    ai_result = response.choices[0].message.content.strip()
+    try:
+        ai_result = response.choices[0].message.content.strip().lower()
+        if ai_result not in ('true', 'false'):
+            raise ValueError('Invalid keyword grading')
+    except (AttributeError, IndexError, TypeError, ValueError):
+        raise LimitReached('採点結果を正しい形式で受信できませんでした。もう一度回答してください。', 502) from None
 
 
     return jsonify({
-        "is_correct": ai_result.lower() == "true"
+        "is_correct": ai_result == "true"
     })
 
 @app.route("/lecture/<int:lecture_id>/quiz/written/check", methods=["POST"])
@@ -794,8 +801,18 @@ def check_written(lecture_id):
         ]
     )
 
-    ai_result = response.choices[0].message.content
-    ai_result = json.loads(ai_result)
+    try:
+        ai_result = json.loads(response.choices[0].message.content)
+        if (not isinstance(ai_result, dict)
+                or type(ai_result.get('is_correct')) is not bool
+                or not isinstance(ai_result.get('feedback'), str)
+                or any(type(ai_result.get(key)) not in (int, float)
+                       or not math.isfinite(ai_result[key]) for key in ('score', 'total'))
+                or not 0 <= ai_result['score'] <= ai_result['total']
+                or ai_result['total'] <= 0):
+            raise ValueError('Invalid written grading')
+    except (AttributeError, IndexError, TypeError, ValueError, RecursionError, OverflowError):
+        raise LimitReached('採点結果を正しい形式で受信できませんでした。もう一度回答してください。', 502) from None
     
     return jsonify(ai_result)
     

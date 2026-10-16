@@ -33,7 +33,7 @@ class AIEndpointTests(unittest.TestCase):
 
     def test_all_routes_success_save_and_shared_pools(self):
         usage = SimpleNamespace(input_tokens=20, output_tokens=10)
-        quiz = '\n'.join(json.dumps({'type': 'keyword', 'answer': 'a', 'question': 'q'}) for _ in range(10))
+        quiz = '\n'.join(json.dumps({'type': 'keyword', 'answer': 'a', 'question': 'q', 'explanation': 'e'}) for _ in range(10))
         def events(**kwargs):
             text = quiz if '10' in str(kwargs['input']) and 'JSON' in str(kwargs['input']) else 'saved AI answer'
             return iter([SimpleNamespace(type='response.output_text.delta', delta=text),
@@ -42,7 +42,8 @@ class AIEndpointTests(unittest.TestCase):
             content='{"is_correct":true,"score":1,"total":1,"feedback":"ok"}'))],
             usage=SimpleNamespace(prompt_tokens=20, completion_tokens=10))
         with patch('app.client.responses.create', side_effect=events) as response_call, patch(
-            'app.client.chat.completions.create', return_value=completion
+            'app.client.chat.completions.create', side_effect=lambda **kwargs: completion if kwargs.get('response_format') else
+            SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='true'))], usage=completion.usage)
         ) as completion_call:
             for route, _, data in self.routes:
                 self.assertEqual(self.post(route, data).status_code, 200, route)

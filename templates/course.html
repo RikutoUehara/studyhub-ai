@@ -1,63 +1,74 @@
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <title>授業管理</title>
+{% extends 'base.html' %}
 
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/style.css') }}"
-    />
-  </head>
+{% block title %}授業管理 | 単位トルトル君{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
 
-  <body>
-    <h1>授業管理</h1>
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">MY COURSES</p>
+    <h1 class="page-title">授業管理</h1>
+    <p class="page-description">授業を選んで、資料の確認や復習を始めましょう。</p>
+  </div>
+  <span class="badge">{{ courses|length }} 件の授業</span>
+</div>
 
-    <form method="POST">
+<div class="dashboard-grid">
+  <aside class="panel course-add-panel" aria-labelledby="add-course-heading">
+    <div class="panel-heading"><div><p class="eyebrow">NEW COURSE</p><h2 id="add-course-heading">授業を追加</h2></div></div>
+    <p class="panel-description">履修している授業を登録すると、講義ごとに資料と学習記録をまとめられます。</p>
+    <form method="POST" class="form-stack">
       <input type="hidden" name="csrf_token" value="{{ security_csrf_token() }}">
-      <p>授業名</p>
-
-      <input type="text" name="course_name" required />
-
-      <br /><br />
-
-      <button type="submit">追加</button>
+      <div class="form-field">
+        <label for="course-name">授業名 <span class="required-label">必須</span></label>
+        <input type="text" id="course-name" name="course_name" placeholder="例：情報科学概論" aria-describedby="course-name-hint" required />
+        <p id="course-name-hint" class="field-hint">登録後、全15回の講義が作成されます。</p>
+      </div>
+      <button type="submit" class="button"><span aria-hidden="true">＋</span> 授業を追加</button>
     </form>
+  </aside>
 
-    <hr />
-
-    <h2>登録済み授業</h2>
-
-    {% for course in courses %}
-
-    <div class="course-item">
-      <a href="{{ url_for('lecture', course_id=course.id) }}">
-        <button>{{ course.name }}</button>
-      </a>
-
-      {% if course_average_scores[course.id] is not none %}
-
-      <span class="course-score">
-        平均得点率：{{ course_average_scores[course.id] }}%
-      </span>
-
+  <section class="course-list-section" aria-labelledby="courses-heading">
+    <div class="panel-heading"><div><h2 id="courses-heading">登録済み授業</h2><p class="field-hint">授業を開くと、講義ごとの資料と復習テストを確認できます。</p></div></div>
+    <div class="course-list">
+      {% for course in courses %}
+      <article class="course-item panel">
+        <div class="course-item-main">
+          <span class="course-icon" aria-hidden="true">▤</span>
+          <div>
+            <h3><a href="{{ url_for('lecture', course_id=course.id) }}" class="course-name">{{ course.name }}</a></h3>
+            {% if course_average_scores[course.id] is not none %}
+            <p class="course-score">平均得点率 <strong>{{ course_average_scores[course.id] }}<small>%</small></strong></p>
+            {% else %}
+            <p class="course-score">平均得点率 <span>未実施</span></p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="course-item-actions">
+          <a href="{{ url_for('lecture', course_id=course.id) }}" class="button button-secondary" aria-label="{{ course.name }}の講義一覧を開く">授業を開く <span aria-hidden="true">&rarr;</span></a>
+          <form
+            method="POST"
+            action="{{ url_for('delete_course', course_id=course.id) }}"
+            data-course-name="{{ course.name }}"
+            onsubmit="return confirm('「' + this.dataset.courseName + '」を本当に削除しますか？\n全15回の講義・分析内容・チャット履歴・テスト結果も削除され、元に戻せません。');"
+          >
+            <input type="hidden" name="csrf_token" value="{{ session['course_delete_token'] }}" />
+            <button type="submit" class="delete-button" aria-label="{{ course.name }}を削除">削除</button>
+          </form>
+        </div>
+      </article>
       {% else %}
-
-      <span class="course-score"> 平均得点率：未実施 </span>
-
-      {% endif %}
-      <form
-        method="POST"
-        action="{{ url_for('delete_course', course_id=course.id) }}"
-        data-course-name="{{ course.name }}"
-        onsubmit="return confirm('「' + this.dataset.courseName + '」を本当に削除しますか？\n全15回の講義・分析内容・チャット履歴・テスト結果も削除され、元に戻せません。');"
-      >
-        <input type="hidden" name="csrf_token" value="{{ session['course_delete_token'] }}" />
-        <button type="submit" class="delete-button">削除</button>
-      </form>
+      <div class="empty-state panel">
+        <span class="empty-state-icon" aria-hidden="true">＋</span>
+        <h3>最初の授業を追加しましょう</h3>
+        <p>授業名を登録すると、PDFのアップロードや<br class="desktop-break" />AIを使った復習を始められます。</p>
+      </div>
+      {% endfor %}
     </div>
+  </section>
+</div>
+{% endblock %}
 
-    {% endfor %}
-    <script src="{{ url_for('static', filename='js/list-refresh.js') }}"></script>
-  </body>
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/list-refresh.js') }}"></script>
+{% endblock %}

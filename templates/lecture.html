@@ -1,50 +1,57 @@
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
+{% extends 'base.html' %}
 
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/style.css') }}"
-    />
+{% block title %}{{ course.name }} | 講義一覧 | 単位トルトル君{% endblock %}
+{% block body_class %}lecture-page{% endblock %}
 
-    <title>講義一覧</title>
-  </head>
+{% block content %}
+<nav class="breadcrumb" aria-label="現在の位置">
+  <a href="{{ url_for('course') }}">授業管理</a><span aria-hidden="true">/</span><span aria-current="page">{{ course.name }}</span>
+</nav>
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">COURSE OVERVIEW</p>
+    <h1 class="page-title">{{ course.name }}</h1>
+    <p class="page-description">講義ごとに資料を整理して、理解と復習を積み重ねましょう。</p>
+  </div>
+  <span class="badge">全{{ lectures|length }}回</span>
+</div>
 
-  <body>
-    <div class="lecture">
-      <h1>{{ course.name }}</h1>
-
-      <h2>講義一覧</h2>
-
-      {% for lecture in lectures %}
-      <div class="lecture-item">
-        <span>第{{ lecture.week }}回</span>
-
-        <div class="lecture-actions">
-          {% if latest_scores[lecture.id] is not none %}
-          <span class="lecture-score">
-            最新得点率：{{ latest_scores[lecture.id] }}%
-          </span>
+<section class="lecture" aria-labelledby="lectures-heading">
+  <div class="panel-heading"><div><h2 id="lectures-heading">講義一覧</h2><p class="field-hint">PDFを登録すると、AIによる要約・チャット・復習テストを利用できます。</p></div></div>
+  <div class="lecture-list">
+    {% for lecture in lectures %}
+    <article class="lecture-item panel">
+      <div class="lecture-item-main">
+        <span class="lecture-number" aria-hidden="true">{{ '%02d'|format(lecture.week) }}</span>
+        <div>
+          <h3>第{{ lecture.week }}回</h3>
+          {% if lecture.pdf_filename %}
+          <span class="lecture-status lecture-status-ready">資料登録済み</span>
           {% else %}
-          <span class="lecture-score"> 未実施 </span>
-          {% endif %} {% if lecture.pdf_filename %}
-
-          <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}">
-            <button>AI分析を見る</button>
-          </a>
-
-          {% else %}
-
-          <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}">
-            <button>PDFアップロード</button>
-          </a>
-
+          <span class="lecture-status">資料未登録</span>
           {% endif %}
         </div>
       </div>
-      {% endfor %}
-    </div>
-    <script src="{{ url_for('static', filename='js/list-refresh.js') }}"></script>
-  </body>
-</html>
+      <div class="lecture-actions">
+        {% if latest_scores[lecture.id] is not none %}
+        <div class="lecture-score"><span>最新得点率</span><strong>{{ latest_scores[lecture.id] }}<small>%</small></strong></div>
+        {% else %}
+        <div class="lecture-score"><span>復習テスト</span><span class="score-pending">未実施</span></div>
+        {% endif %}
+        {% if lecture.pdf_filename %}
+        <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}" class="button button-secondary" aria-label="第{{ lecture.week }}回のAI分析を見る">AI分析を見る <span aria-hidden="true">&rarr;</span></a>
+        {% else %}
+        <a href="{{ url_for('upload_lecture', lecture_id=lecture.id) }}" class="button button-secondary" aria-label="第{{ lecture.week }}回のPDFをアップロード">PDFアップロード <span aria-hidden="true">＋</span></a>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state panel"><h3>講義はまだありません</h3><p>授業管理から登録内容を確認してください。</p><a href="{{ url_for('course') }}" class="button button-secondary">授業管理に戻る</a></div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/list-refresh.js') }}"></script>
+{% endblock %}

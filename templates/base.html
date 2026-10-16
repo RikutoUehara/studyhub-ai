@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#162b4d">
+    <title>{% block title %}単位トルトル君{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body class="app-body {% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">本文へスキップ</a>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="{{ url_for('home') }}" aria-label="単位トルトル君 ホーム">
+          <span class="brand-mark" aria-hidden="true">単</span>
+          <span class="brand-copy">
+            <span class="brand-name">単位トルトル君</span>
+            <span class="brand-caption">学びを、理解につなげる。</span>
+          </span>
+        </a>
+        <nav class="main-nav" aria-label="メインナビゲーション">
+          {% if current_user.is_authenticated %}
+          <a class="nav-link" href="{{ url_for('home') }}"{% if request.endpoint == 'home' %} aria-current="page"{% endif %}>ホーム</a>
+          <a class="nav-link" href="{{ url_for('course') }}"{% if request.endpoint in ['course', 'lecture', 'upload_lecture'] %} aria-current="page"{% endif %}>授業一覧</a>
+          <form class="header-actions" method="POST" action="{{ url_for('logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ security_csrf_token() }}">
+            <button class="button button-ghost" type="submit">ログアウト</button>
+          </form>
+          {% else %}
+          <a class="nav-link" href="{{ url_for('login') }}"{% if request.endpoint == 'login' %} aria-current="page"{% endif %}>ログイン</a>
+          <a class="button button-small" href="{{ url_for('register') }}"{% if request.endpoint == 'register' %} aria-current="page"{% endif %}>新規登録</a>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+    <main id="main-content" class="app-main {% block main_class %}{% endblock %}">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="app-footer">
+      <div class="footer-inner">
+        <span class="footer-brand">単位トルトル君 <span>学びを支える、あなたのワークスペース。</span></span>
+        {% include '_public_links.html' %}
+      </div>
+    </footer>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

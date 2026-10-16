@@ -1,35 +1,60 @@
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="google-site-verification" content="pR0LN6meuqwCcDz47ntCnNfO2r_h2zi88t_JOrbiJdA" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>単位トルトル君</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/style.css') }}"
-    />
-  </head>
-  <body>
-    <div class="index">
-      <h1>単位トルトル君</h1>
-      <p>大学生のためのAI学習支援システム</p>
+{% extends 'base.html' %}
 
+{% block title %}単位トルトル君 | 授業の理解を、次の一歩へ{% endblock %}
+{% block body_class %}home-page{% endblock %}
+{% block head_extra %}
+<meta name="google-site-verification" content="pR0LN6meuqwCcDz47ntCnNfO2r_h2zi88t_JOrbiJdA" />
+{% endblock %}
+
+{% block content %}
+<section class="hero" aria-labelledby="home-heading">
+  <div class="hero-content">
+    <p class="eyebrow">AI STUDY ASSISTANT</p>
+    <h1 id="home-heading">授業の理解を、<br />次の一歩へ。</h1>
+    <p class="hero-description">授業資料の整理から、疑問の解消、テスト前の復習まで。<br class="desktop-break" />単位トルトル君が、毎日の学びをサポートします。</p>
+    <div class="hero-actions">
       {% if current_user.is_authenticated %}
-        <a href="{{ url_for('course')}}" class="button"> 学習を始める </a>
-        {% include '_ai_usage.html' %}
+      <a href="{{ url_for('course') }}" class="button">学習を続ける <span aria-hidden="true">&rarr;</span></a>
       {% else %}
-        <a href="{{ url_for('login') }}" class="button">ログインして学習を始める</a>
-        <p><a href="{{ url_for('register') }}">新規登録</a></p>
-      {% endif %}
-
-      {% include '_public_links.html' %}
-
-      {% if current_user.is_authenticated %}
-      <div class="logout-area">
-        <form method="POST" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ security_csrf_token() }}"><button type="submit">ログアウト</button></form>
-      </div>
+      <a href="{{ url_for('login') }}" class="button">ログインして学習を始める <span aria-hidden="true">&rarr;</span></a>
+      <a href="{{ url_for('register') }}" class="button button-secondary">新規登録</a>
       {% endif %}
     </div>
-  </body>
-</html>
+    <p class="hero-note">大学生のためのAI学習支援アプリ</p>
+  </div>
+  <div class="study-flow panel" aria-label="学習の流れ">
+    <div class="study-flow-heading"><span class="badge">LEARNING FLOW</span><span class="study-flow-dot" aria-hidden="true"></span></div>
+    <h2>資料を、理解につなげる。</h2>
+    <ol class="study-flow-list">
+      <li><span class="step-number" aria-hidden="true">01</span><div><strong>授業のPDFをアップロード</strong><p>授業ごと・講義ごとに資料を整理</p></div></li>
+      <li><span class="step-number" aria-hidden="true">02</span><div><strong>要約とチャットで理解を深める</strong><p>大切なポイントも、気になる疑問も</p></div></li>
+      <li><span class="step-number" aria-hidden="true">03</span><div><strong>復習テストで定着を確認</strong><p>得点の推移を見ながら、次の復習へ</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="home-features" aria-labelledby="features-heading">
+  <div class="panel-heading"><div><p class="eyebrow">YOUR LEARNING, CONNECTED</p><h2 id="features-heading">いつもの学習を、ひとつの場所で。</h2></div></div>
+  <div class="feature-grid">
+    <article class="feature-card panel">
+      <span class="feature-mark" aria-hidden="true">01</span>
+      <h3>資料のポイントをつかむ</h3>
+      <p>アップロードしたPDFからAIが要約・重要語句を整理。授業の全体像を振り返れます。</p>
+    </article>
+    <article class="feature-card panel">
+      <span class="feature-mark" aria-hidden="true">02</span>
+      <h3>わからないところを聞く</h3>
+      <p>資料についてAIチャットで質問。その場で疑問を解消し、理解を深められます。</p>
+    </article>
+    <article class="feature-card panel">
+      <span class="feature-mark" aria-hidden="true">03</span>
+      <h3>復習の成果を確かめる</h3>
+      <p>AIが作る復習テストで理解度を確認。結果と得点の推移を次の学習に役立てられます。</p>
+    </article>
+  </div>
+</section>
+
+{% if current_user.is_authenticated %}
+{% include '_ai_usage.html' %}
+{% endif %}
+{% endblock %}

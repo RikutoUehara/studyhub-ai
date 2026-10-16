@@ -1,15 +1,9 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>プライバシーポリシー | 単位トルトル君</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-  <main class="policy-page">
-    <h1>プライバシーポリシー</h1>
-    <p>最終更新日：2026年10月14日</p>
+{% extends 'base.html' %}
+{% block title %}プライバシーポリシー | 単位トルトル君{% endblock %}
+{% block content %}
+<article class="policy-page">
+    <h1 class="page-title">プライバシーポリシー</h1>
+    <p class="policy-meta">最終更新日：2026年10月14日</p>
     <p>単位トルトル君では、アカウントのメールアドレス、パスワードハッシュ、認証状態、授業・講義情報、PDFと抽出本文、要約、チャット履歴、復習テスト結果、利用回数・推定費用等を扱います。ログイン状態の維持とCSRF対策にCookieを使用します。不正利用対策の台帳ではメールアドレスやIP等の識別対象をハッシュ化して扱います。これは匿名化を保証するものではありません。</p>
     <p>これらの情報は、認証、学習機能の提供、データ保存、メール送信、利用制限、費用管理、不正利用対策、障害対応、問い合わせ対応に利用します。</p>
     <p>サービス提供にRender（アプリ稼働）、Neon（データベース）、Cloudflare R2（PDF保存）、Resend（メール送信）、OpenAI（AI処理）を利用します。AI機能を実行すると、処理に必要な資料の抽出本文、質問、会話履歴、回答や採点基準等がOpenAIへ送られます。メール送信では宛先とメール内容がResendへ送られます。外部事業者での取扱いは各社の契約・ポリシーに従います。国外の設備等で処理される場合があります。</p>
@@ -18,8 +12,7 @@
     <p>情報の保護のため、認証・所有者によるアクセス制限・HTTPS等を使用します。ただし、絶対的な安全性を保証するものではありません。本ポリシーを変更する場合は、公開ページ等で案内します。</p>
     <p>運営者：単位トルトル君 運営</p>
     <p>問い合わせ先：<a href="mailto:aiknowledgehub.support@gmail.com">aiknowledgehub.support@gmail.com</a></p>
-    {% include '_public_links.html' %}
+
     <p><a href="{{ url_for('register') }}">新規登録へ</a> · <a href="{{ url_for('login') }}">ログインへ</a></p>
-  </main>
-</body>
-</html>
+</article>
+{% endblock %}
