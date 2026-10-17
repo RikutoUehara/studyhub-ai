@@ -137,15 +137,11 @@ class StreamPersistenceTests(unittest.TestCase):
         questions = [
             {'type': 'multiple_choice', 'question': 'Which protocol?',
              'choices': ['HTTP', 'PDF', 'CSS', 'SQL'], 'answer': 'HTTP', 'explanation': 'Web protocol.'}
-            for _ in range(4)
+            for _ in range(6)
         ] + [
             {'type': 'true_false', 'question': 'HTTP is a web protocol.' if index % 2 == 0 else 'HTTP is an image format.',
              'answer': index % 2 == 0, 'explanation': 'Fixture explanation.'}
             for index in range(4)
-        ] + [
-            {'type': 'keyword', 'question': 'Name the web protocol.',
-             'answer': 'HTTP', 'explanation': 'HTTP.'}
-            for _ in range(2)
         ]
         output = '\n'.join(json.dumps(question) for question in questions) + '\n'
         with patch('app.client.responses.create', side_effect=lambda **kwargs: sdk_events(output)) as provider:
@@ -156,8 +152,9 @@ class StreamPersistenceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         generated = [json.loads(line) for line in response.get_data(as_text=True).splitlines()]
         self.assertEqual(len(generated), 10)
-        self.assertEqual({question['type'] for question in generated}, {'multiple_choice', 'true_false', 'keyword'})
+        self.assertEqual({question['type'] for question in generated}, {'multiple_choice', 'true_false'})
         self.assertEqual(provider.call_count, 1)
+        self.assertNotIn('keyword', provider.call_args.kwargs['input'])
 
         def completion(content):
             return ChatCompletion.model_construct(

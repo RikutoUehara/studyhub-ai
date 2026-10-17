@@ -20,9 +20,6 @@ def randomized_question(line):
     elif question.get("type") == "true_false":
         if type(question.get("answer")) is not bool:
             raise ValueError("Invalid true/false answer")
-    elif question.get("type") == "keyword":
-        if not isinstance(question.get("answer"), str) or not question["answer"].strip():
-            raise ValueError("Invalid keyword answer")
     else:
         raise ValueError("Unsupported question type")
     return json.dumps(question, ensure_ascii=False)

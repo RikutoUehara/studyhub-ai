@@ -35,7 +35,7 @@ class SecurityTests(unittest.TestCase):
     def test_anonymous_other_owner_missing_and_csrf(self):
         usage = SimpleNamespace(input_tokens=5, output_tokens=5)
         events = [SimpleNamespace(type='response.completed', response=SimpleNamespace(usage=usage))]
-        quiz = '\n'.join(json.dumps({'type': 'keyword', 'question': 'q', 'answer': 'a',
+        quiz = '\n'.join(json.dumps({'type': 'true_false', 'question': 'q', 'answer': True,
                                     'explanation': 'e'}) for _ in range(10))
         def stream_events(**kwargs):
             if '1行につき1問' in str(kwargs.get('input')):

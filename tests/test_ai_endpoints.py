@@ -33,7 +33,7 @@ class AIEndpointTests(unittest.TestCase):
 
     def test_all_routes_success_save_and_shared_pools(self):
         usage = SimpleNamespace(input_tokens=20, output_tokens=10)
-        quiz = '\n'.join(json.dumps({'type': 'keyword', 'answer': 'a', 'question': 'q', 'explanation': 'e'}) for _ in range(10))
+        quiz = '\n'.join(json.dumps({'type': 'true_false', 'answer': True, 'question': 'q', 'explanation': 'e'}) for _ in range(10))
         def events(**kwargs):
             text = quiz if '10' in str(kwargs['input']) and 'JSON' in str(kwargs['input']) else 'saved AI answer'
             return iter([SimpleNamespace(type='response.output_text.delta', delta=text),

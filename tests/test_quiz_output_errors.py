@@ -10,8 +10,8 @@ import test_stream_persistence as fixtures
 from app import app, db, QuizAttempt
 
 
-QUESTION = {'type': 'keyword', 'question': 'Name the protocol.',
-            'answer': 'HTTP', 'explanation': 'HTTP connects web clients and servers.'}
+QUESTION = {'type': 'true_false', 'question': 'Name the protocol.',
+            'answer': True, 'explanation': 'HTTP connects web clients and servers.'}
 
 
 class TrackedStream:
@@ -76,7 +76,8 @@ class QuizOutputErrorTests(unittest.TestCase):
         cases = [
             {**QUESTION, 'question': ''}, {**QUESTION, 'question': []},
             {key: value for key, value in QUESTION.items() if key != 'explanation'},
-            {**QUESTION, 'type': 'unknown'}, {**QUESTION, 'answer': ['HTTP']},
+            {**QUESTION, 'type': 'unknown'},
+            {**QUESTION, 'type': 'keyword', 'answer': 'HTTP'}, {**QUESTION, 'answer': ['HTTP']},
             {**QUESTION, 'type': 'true_false', 'answer': 'true'},
             {**QUESTION, 'type': 'multiple_choice', 'choices': ['A'] * 4, 'answer': 'A'},
             {**QUESTION, 'type': 'multiple_choice', 'choices': ['A', 'B', 'C', 'D'], 'answer': 'Z'},
